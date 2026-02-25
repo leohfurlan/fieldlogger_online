@@ -8,3 +8,4 @@ reset_table.py
 importar_compostos_sankhya.py
 teste.py
 backfill_batch_id.py
+.gitignore
