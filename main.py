@@ -1,50 +1,56 @@
-# main.py
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 import os
 from pathlib import Path
 from typing import Set
+
 from dotenv import load_dotenv
-
-load_dotenv()
-
-
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
+
+load_dotenv()
 
 # Imports que funcionam tanto rodando "uvicorn main:app" dentro da pasta app
 # quanto rodando "uvicorn app.main:app" a partir da pasta pai.
 try:
+    import db as db_layer
+    from config import logger
+    from cycle_detector import CycleLifecycleManager
     from db import (
         assign_composto_to_batch,
-        ensure_batch_id_schema,
+        close_pool,
         ensure_compostos_schema,
-        fetch_batch_runtime_state,
+        ensure_cycle_tracking_schema,
         fetch_history_filter_options,
         fetch_monitor_history,
         import_compostos_from_sankhya,
-        insert_monitor_row,
         list_compostos_catalog,
         list_tables,
     )
     from modbus_client import FieldLoggerModbus
+    from readings_buffer import ReadingsBuffer
 except ModuleNotFoundError:
-    from db import (
+    from . import db as db_layer
+    from .config import logger
+    from .cycle_detector import CycleLifecycleManager
+    from .db import (
         assign_composto_to_batch,
-        ensure_batch_id_schema,
+        close_pool,
         ensure_compostos_schema,
-        fetch_batch_runtime_state,
+        ensure_cycle_tracking_schema,
         fetch_history_filter_options,
         fetch_monitor_history,
         import_compostos_from_sankhya,
-        insert_monitor_row,
         list_compostos_catalog,
         list_tables,
     )
-    from modbus_client import FieldLoggerModbus
+    from .modbus_client import FieldLoggerModbus
+    from .readings_buffer import ReadingsBuffer
+
 
 BASE_DIR = Path(__file__).resolve().parent
+
 
 def _env_str(name: str, default: str) -> str:
     value = os.getenv(name)
@@ -83,92 +89,26 @@ MODBUS_HOST = _env_str("MODBUS_HOST", "172.16.30.95")
 MODBUS_PORT = _env_int("MODBUS_PORT", 502)
 MODBUS_UNIT_ID = _env_int("MODBUS_UNIT_ID", 255)
 POLL_SECONDS = _env_float("POLL_SECONDS", 1.0)
+READINGS_BATCH_SIZE = _env_int("READINGS_BATCH_SIZE", 100)
+READINGS_FLUSH_INTERVAL_S = _env_float("READINGS_FLUSH_INTERVAL_S", 2.0)
+CYCLE_STATE_PERSIST_INTERVAL_S = _env_float("CYCLE_STATE_PERSIST_INTERVAL_S", 10.0)
+CYCLE_STALE_TIMEOUT_S = _env_float("CYCLE_STALE_TIMEOUT_S", 2 * 60 * 60)
+CYCLE_SIGNATURE_SAMPLE_EVERY = _env_int("CYCLE_SIGNATURE_SAMPLE_EVERY", 10)
 
 # -------- WS CLIENTS --------
 ws_clients: Set[WebSocket] = set()
 
-
-class BatchCycleDetector:
-    """
-    Detector de ciclo por borda:
-      - borda de subida do botao_start (0->1) inicia batch
-      - borda de descida da tampa_descarga (1->0) encerra batch
-
-    Regra de tampa usada aqui (conforme sua configuracao):
-      1 = tampa fechada
-      0 = tampa aberta
-    """
-
-    def __init__(self):
-        self.next_batch_id = 1
-        self.current_batch_id: int | None = None
-        self.cycle_active = False
-        self.prev_start: int | None = None
-        self.prev_tampa_descarga: int | None = None
-
-    @staticmethod
-    def _as_bit(value) -> int:
-        try:
-            return 1 if int(value) > 0 else 0
-        except Exception:
-            return 0
-
-    def _open_new_batch(self) -> None:
-        self.current_batch_id = self.next_batch_id
-        self.next_batch_id += 1
-        self.cycle_active = True
-
-    def restore(self, state: dict) -> None:
-        self.next_batch_id = max(1, int(state.get("next_batch_id") or 1))
-        self.prev_start = (
-            self._as_bit(state["last_start"])
-            if state.get("last_start") is not None
-            else None
-        )
-        self.prev_tampa_descarga = (
-            self._as_bit(state["last_tampa_descarga"])
-            if state.get("last_tampa_descarga") is not None
-            else None
-        )
-
-        last_batch_id = state.get("last_batch_id")
-        if isinstance(last_batch_id, int) and self.prev_tampa_descarga == 1:
-            # ultima leitura foi com tampa fechada e batch em andamento
-            self.current_batch_id = last_batch_id
-            self.cycle_active = True
-        else:
-            self.current_batch_id = None
-            self.cycle_active = False
-
-    def process(self, botao_start, tampa_descarga) -> int | None:
-        start = self._as_bit(botao_start)
-        tampa = self._as_bit(tampa_descarga)
-
-        start_rising = self.prev_start == 0 and start == 1
-        # tampa abrindo: 1 (fechada) -> 0 (aberta)
-        tampa_open_edge = self.prev_tampa_descarga == 1 and tampa == 0
-
-        if not self.cycle_active:
-            # primeira leitura com sistema ja em ciclo
-            if self.prev_start is None and self.prev_tampa_descarga is None:
-                if start == 1 and tampa == 1:
-                    self._open_new_batch()
-            elif start_rising:
-                self._open_new_batch()
-
-        batch_id_for_row = self.current_batch_id if self.cycle_active else None
-
-        if self.cycle_active and tampa_open_edge:
-            # linha atual ainda pertence ao batch; fechamento vale para a proxima
-            self.cycle_active = False
-            self.current_batch_id = None
-
-        self.prev_start = start
-        self.prev_tampa_descarga = tampa
-        return batch_id_for_row
-
-
-batch_cycle_detector = BatchCycleDetector()
+readings_buffer = ReadingsBuffer(
+    max_batch_size=READINGS_BATCH_SIZE,
+    flush_interval_s=READINGS_FLUSH_INTERVAL_S,
+)
+cycle_detector = CycleLifecycleManager(
+    db_layer=db_layer,
+    state_key=db_layer.STATE_KEY_CYCLE_DETECTOR,
+    state_persist_interval_s=CYCLE_STATE_PERSIST_INTERVAL_S,
+    stale_cycle_timeout_s=CYCLE_STALE_TIMEOUT_S,
+    signature_sample_every=CYCLE_SIGNATURE_SAMPLE_EVERY,
+)
 
 
 async def broadcaster(payload: dict) -> None:
@@ -188,10 +128,10 @@ async def poller() -> None:
     """
     Loop principal:
       - conecta Modbus TCP
-      - lê registradores
-      - grava no Oracle
+      - le registradores
+      - grava em lote no Oracle
       - envia ao vivo via WebSocket
-    Tem reconexão automática se cair rede/modbus.
+    Tem reconexao automatica se cair rede/modbus.
     """
     while True:
         fl = FieldLoggerModbus(MODBUS_HOST, MODBUS_PORT, MODBUS_UNIT_ID)
@@ -201,16 +141,20 @@ async def poller() -> None:
 
             while True:
                 data = await asyncio.to_thread(fl.read)
-                batch_id = batch_cycle_detector.process(
-                    data.get("botao_start"),
-                    data.get("tampa_descarga"),
-                )
-                data["batch_id"] = batch_id
 
-                # grava no Oracle (deixe o db.py fazer commit)
                 try:
-                    await asyncio.to_thread(
-                        insert_monitor_row,
+                    decision = cycle_detector.process_reading(data)
+                    await asyncio.to_thread(cycle_detector.sync_db, readings_buffer)
+
+                    resolved_batch_id = decision.batch_id
+                    if decision.cycle_token:
+                        recovered_batch_id = cycle_detector.batch_id_for_token(
+                            decision.cycle_token
+                        )
+                        if recovered_batch_id is not None:
+                            resolved_batch_id = recovered_batch_id
+
+                    readings_buffer.append(
                         {
                             "temp_raw": data.get("temperatura_term_raw"),
                             "corrente_raw": data.get("corrente_raw"),
@@ -218,13 +162,32 @@ async def poller() -> None:
                             "corrente": data.get("corrente"),
                             "botao_start": data.get("botao_start"),
                             "tampa_descarga": data.get("tampa_descarga"),
-                            "batch_id": batch_id,
+                            "batch_id": resolved_batch_id,
                             "src": f"{MODBUS_HOST}:{MODBUS_PORT}/u{MODBUS_UNIT_ID}",
-                        },
+                            "_cycle_token": decision.cycle_token,
+                        }
                     )
-                except Exception as e:
-                    # Não derruba tempo real por falha de banco
-                    data["_db_error"] = str(e)
+
+                    if decision.cycle_token and resolved_batch_id is not None:
+                        readings_buffer.assign_batch_id(
+                            decision.cycle_token,
+                            resolved_batch_id,
+                        )
+
+                    if readings_buffer.should_flush():
+                        await asyncio.to_thread(readings_buffer.flush)
+
+                    if decision.start_event or decision.end_event:
+                        await asyncio.to_thread(cycle_detector.persist_state, True)
+                    else:
+                        await asyncio.to_thread(cycle_detector.persist_state, False)
+
+                    data["batch_id"] = resolved_batch_id
+                    if readings_buffer.failure_count > 0:
+                        data["_db_failures"] = readings_buffer.failure_count
+                except Exception as exc:
+                    # Nao derruba tempo real por falha de banco
+                    data["_db_error"] = str(exc)
 
                 await broadcaster(data)
                 await asyncio.sleep(POLL_SECONDS)
@@ -236,13 +199,13 @@ async def poller() -> None:
             except Exception:
                 pass
             raise
-        except Exception as e:
+        except Exception as exc:
             # caiu modbus/rede: espera e tenta reconectar
             try:
                 await asyncio.to_thread(fl.close)
             except Exception:
                 pass
-            await broadcaster({"_status": "modbus_down", "_error": str(e)})
+            await broadcaster({"_status": "modbus_down", "_error": str(exc)})
             await asyncio.sleep(2.0)
 
 
@@ -250,28 +213,29 @@ async def poller() -> None:
 async def lifespan(app: FastAPI):
     try:
         await asyncio.to_thread(ensure_compostos_schema)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Falha ao garantir schema de compostos: {}", exc)
 
     try:
-        await asyncio.to_thread(ensure_batch_id_schema)
-    except Exception:
-        # Se nao conseguir alterar schema, app segue; insercao lida com fallback.
-        pass
+        await asyncio.to_thread(ensure_cycle_tracking_schema)
+    except Exception as exc:
+        logger.warning("Falha ao garantir schema de ciclo: {}", exc)
 
-    try:
-        runtime_state = await asyncio.to_thread(fetch_batch_runtime_state)
-        batch_cycle_detector.restore(runtime_state)
-    except Exception:
-        pass
+    await asyncio.to_thread(cycle_detector.startup)
 
     task = asyncio.create_task(poller())
     yield
+
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    finally:
+        await asyncio.to_thread(cycle_detector.sync_db, readings_buffer)
+        await asyncio.to_thread(readings_buffer.flush, True)
+        await asyncio.to_thread(cycle_detector.shutdown)
+        await asyncio.to_thread(close_pool)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -285,7 +249,7 @@ def _parse_history_datetime(value: str | None, field_name: str) -> datetime | No
     if not text:
         return None
 
-    # Aceita ISO e também formato Oracle retornado pela aplicação.
+    # Aceita ISO e tambem formato Oracle retornado pela aplicacao.
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(text, fmt)
@@ -301,7 +265,7 @@ def _parse_history_datetime(value: str | None, field_name: str) -> datetime | No
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Parâmetro inválido: '{field_name}'. Use 'YYYY-MM-DD', "
+                f"Parametro invalido: '{field_name}'. Use 'YYYY-MM-DD', "
                 "'YYYY-MM-DDTHH:MM' ou 'YYYY-MM-DD HH:MM:SS'."
             ),
         ) from exc
@@ -312,7 +276,7 @@ def index():
     html_path = BASE_DIR / "templates" / "index.html"
     if not html_path.exists():
         return HTMLResponse(
-            "<h3>index.html não encontrado em templates/</h3>", status_code=500
+            "<h3>index.html nao encontrado em templates/</h3>", status_code=500
         )
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
 
@@ -322,7 +286,7 @@ def history_page():
     html_path = BASE_DIR / "templates" / "history.html"
     if not html_path.exists():
         return HTMLResponse(
-            "<h3>history.html não encontrado em templates/</h3>", status_code=500
+            "<h3>history.html nao encontrado em templates/</h3>", status_code=500
         )
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
 
@@ -331,11 +295,11 @@ def history_page():
 def history_data(
     start: str | None = Query(
         default=None,
-        description="Início do período. Ex.: 2026-02-25T07:30 ou 2026-02-25 07:30:00",
+        description="Inicio do periodo. Ex.: 2026-02-25T07:30 ou 2026-02-25 07:30:00",
     ),
     end: str | None = Query(
         default=None,
-        description="Fim do período. Ex.: 2026-02-25T08:00 ou 2026-02-25 08:00:00",
+        description="Fim do periodo. Ex.: 2026-02-25T08:00 ou 2026-02-25 08:00:00",
     ),
     lote: str | None = Query(default=None, description="Filtro opcional por lote"),
     composto: str | None = Query(default=None, description="Filtro opcional por composto"),
@@ -347,7 +311,7 @@ def history_data(
     if start_ts and end_ts and start_ts > end_ts:
         raise HTTPException(
             status_code=422,
-            detail="Parâmetro inválido: 'start' deve ser menor ou igual a 'end'.",
+            detail="Parametro invalido: 'start' deve ser menor ou igual a 'end'.",
         )
     return fetch_monitor_history(
         start_ts=start_ts,
@@ -369,7 +333,7 @@ def history_options(
     if start_ts and end_ts and start_ts > end_ts:
         raise HTTPException(
             status_code=422,
-            detail="Parâmetro inválido: 'start' deve ser menor ou igual a 'end'.",
+            detail="Parametro invalido: 'start' deve ser menor ou igual a 'end'.",
         )
     return fetch_history_filter_options(start_ts=start_ts, end_ts=end_ts)
 
@@ -400,13 +364,16 @@ def batch_assign_composto(
         observacoes=observacoes,
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("reason", "Falha ao vincular composto."))
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("reason", "Falha ao vincular composto."),
+        )
     return result
 
 
 @app.get("/health/db")
 def health_db():
-    # Se conectar e listar, tá ok
+    # Se conectar e listar, ta ok
     tables = list_tables("ENGENHARIA")
     return {"ok": True, "owner": "ENGENHARIA", "tables_count": len(tables)}
 
@@ -418,7 +385,7 @@ def db_tables():
 
 @app.get("/health/modbus")
 def health_modbus():
-    # check rápido (sem ficar preso)
+    # check rapido (sem ficar preso)
     fl = FieldLoggerModbus(MODBUS_HOST, MODBUS_PORT, MODBUS_UNIT_ID)
     ok = fl.connect()
     try:
@@ -439,7 +406,7 @@ async def ws_endpoint(ws: WebSocket):
     ws_clients.add(ws)
     try:
         while True:
-            # Mantém a conexão aberta; dados chegam via broadcaster()
+            # Mantem a conexao aberta; dados chegam via broadcaster()
             await ws.receive_text()
     except WebSocketDisconnect:
         pass
