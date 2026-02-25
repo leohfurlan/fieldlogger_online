@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 reset_table.py
 *.sql
+!sql/
+!sql/*.sql
 *.log
 importar_compostos_sankhya.py
 teste.py
