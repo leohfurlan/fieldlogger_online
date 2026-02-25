@@ -11,6 +11,9 @@ Aplicacao FastAPI para monitoramento online de um FieldLogger via Modbus TCP, pe
   - `botao_start` (borda 0->1) inicia batch
   - `tampa_descarga` (borda 1->0) encerra batch
   - Regra de tampa usada: `1 = fechada`, `0 = aberta`
+- Buffer de leituras com `executemany` (menos carga no Oracle)
+- Estado do detector de ciclo persistido em `ENGENHARIA.APP_STATE`
+- Tabela `ENGENHARIA.FIELDLOGGER_BATCHES` (1 linha por ciclo)
 - Catalogo de compostos (`FIELDLOGGER_COMPOSTOS`) e vinculo ao batch
 - Vinculo de `composto`, `lote` e `observacoes` para todas as linhas de um `batch_id`
 
@@ -18,7 +21,7 @@ Aplicacao FastAPI para monitoramento online de um FieldLogger via Modbus TCP, pe
 
 - Python 3.11+ (recomendado 3.12/3.13)
 - Oracle acessivel com credenciais validas
-- (Opcional no Windows) Oracle Instant Client para modo thick
+- Driver `oracledb` em thin mode (padrao no projeto)
 
 ## Instalacao
 
@@ -36,12 +39,42 @@ Configure no arquivo `.env`:
 DB_DSN=SEU_DSN
 DB_USER=SEU_USUARIO
 DB_PASSWORD=SUA_SENHA
-ORACLE_CLIENT_LIB_DIR=C:\\oracle\\instantclient_23_9
 APP_LOG_FILE=app.log
+
+MODBUS_HOST=172.16.30.95
+MODBUS_PORT=502
+MODBUS_UNIT_ID=255
+POLL_SECONDS=1
+
+READINGS_BATCH_SIZE=100
+READINGS_FLUSH_INTERVAL_S=2
 ```
 
-Observacao:
-- `ORACLE_CLIENT_LIB_DIR` e opcional. Se ausente, o driver tenta modo thin.
+Variaveis opcionais adicionais:
+
+```env
+CYCLE_STATE_PERSIST_INTERVAL_S=10
+CYCLE_STALE_TIMEOUT_S=7200
+CYCLE_SIGNATURE_SAMPLE_EVERY=10
+DB_POOL_MIN=1
+DB_POOL_MAX=4
+DB_POOL_INCREMENT=1
+```
+
+## Migracao de banco (DDL)
+
+Aplicar na ordem:
+
+```sql
+@sql/001_create_batch_tables.sql
+@sql/002_create_state.sql
+```
+
+Esses scripts criam:
+
+- `ENGENHARIA.FIELDLOGGER_BATCHES`
+- FK de `FIELDLOGGER_MONITOR.BATCH_ID -> FIELDLOGGER_BATCHES.BATCH_ID`
+- `ENGENHARIA.APP_STATE`
 
 ## Execucao
 
@@ -50,20 +83,45 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Acesse:
+
 - Monitoramento online: `http://localhost:8000/`
 - Historico: `http://localhost:8000/historico`
 
-## Estrutura de banco
+## Testes
 
-Scripts uteis:
+Teste unitario minimo do detector de ciclo:
 
-- Criar objetos: `python create_table.py`
-- Resetar tabelas: `python reset_table.py`
-- SQL base: `sql.sql`
+```bash
+pytest -q
+```
 
-Tabelas principais:
-- `ENGENHARIA.FIELDLOGGER_MONITOR`
-- `ENGENHARIA.FIELDLOGGER_COMPOSTOS`
+## Validacao rapida no Oracle
+
+1. Execute a aplicacao e gere um ciclo real (start -> fim).
+2. Verifique se batches foram criados e fechados:
+
+```sql
+SELECT batch_id, start_ts, end_ts, duration_s, max_temp, avg_temp, signature
+FROM engenharia.fieldlogger_batches
+ORDER BY batch_id DESC;
+```
+
+3. Verifique leituras vinculadas ao ciclo:
+
+```sql
+SELECT batch_id, COUNT(*) AS total
+FROM engenharia.fieldlogger_monitor
+GROUP BY batch_id
+ORDER BY batch_id DESC;
+```
+
+4. Verifique estado persistido do detector:
+
+```sql
+SELECT key, DBMS_LOB.SUBSTR(value, 4000, 1) AS value_json, updated_at
+FROM engenharia.app_state
+WHERE key = 'cycle_detector_state';
+```
 
 ## Scripts de apoio
 
@@ -87,6 +145,7 @@ Tabelas principais:
 
 ## Observacoes tecnicas
 
-- O host/porta/unit_id do Modbus estao definidos em `main.py`.
-- O frontend usa CDN para Tabulator, Chart.js e XLSX.
-- Para producao, considere travar versoes, usar proxy reverso e executar sem `--reload`.
+- O frontend atual foi mantido (sem quebra de compatibilidade).
+- Insercoes de leitura usam `executemany` e commit por lote.
+- Em falha Oracle, o buffer de leituras permanece em memoria e tenta novamente no proximo flush.
+- O detector persiste estado em eventos de start/end, periodicamente durante ciclo ativo e no shutdown.
