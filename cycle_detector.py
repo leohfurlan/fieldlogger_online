@@ -133,6 +133,16 @@ class CycleLifecycleManager:
 
         self._state_dirty = True
         self._last_state_persist_monotonic = 0.0
+        self._persist_retry_not_before_monotonic = 0.0
+        self._persist_retry_backoff_s = 1.0
+        self._max_persist_retry_backoff_s = 30.0
+        self._last_persist_error_log_monotonic = 0.0
+        self._persist_error_log_interval_s = 15.0
+        self._sync_retry_not_before_monotonic = 0.0
+        self._sync_retry_backoff_s = 1.0
+        self._max_sync_retry_backoff_s = 30.0
+        self._last_sync_error_log_monotonic = 0.0
+        self._sync_error_log_interval_s = 15.0
 
     def startup(self) -> dict:
         state = None
@@ -218,6 +228,9 @@ class CycleLifecycleManager:
 
         created_ids: dict[str, int] = {}
         closed_tokens: set[str] = set()
+        now = time.monotonic()
+        if now < self._sync_retry_not_before_monotonic:
+            return False
 
         try:
             with self.db.get_conn() as conn:
@@ -244,9 +257,23 @@ class CycleLifecycleManager:
                         closed_tokens.add(cycle.token)
                 conn.commit()
         except Exception as exc:
-            logger.warning("Falha ao sincronizar ciclo com Oracle: {}", exc)
+            self._sync_retry_not_before_monotonic = now + self._sync_retry_backoff_s
+            self._sync_retry_backoff_s = min(
+                self._sync_retry_backoff_s * 2.0,
+                self._max_sync_retry_backoff_s,
+            )
+            should_log = (
+                self._last_sync_error_log_monotonic <= 0
+                or (now - self._last_sync_error_log_monotonic)
+                >= self._sync_error_log_interval_s
+            )
+            if should_log:
+                self._last_sync_error_log_monotonic = now
+                logger.warning("Falha ao sincronizar ciclo com Oracle: {}", exc)
             return False
 
+        self._sync_retry_not_before_monotonic = 0.0
+        self._sync_retry_backoff_s = 1.0
         for cycle in targets:
             if cycle.token in created_ids:
                 cycle.batch_id = created_ids[cycle.token]
@@ -273,6 +300,10 @@ class CycleLifecycleManager:
         return None
 
     def persist_state(self, force: bool = False) -> bool:
+        now = time.monotonic()
+        if not force and now < self._persist_retry_not_before_monotonic:
+            return False
+
         should_persist = force or self._state_dirty
 
         if not should_persist and self.active_cycle is not None:
@@ -288,11 +319,26 @@ class CycleLifecycleManager:
                 self.db.set_state(conn, self.state_key, payload)
                 conn.commit()
         except Exception as exc:
-            logger.warning("Falha ao persistir estado do detector: {}", exc)
+            self._persist_retry_not_before_monotonic = now + self._persist_retry_backoff_s
+            self._persist_retry_backoff_s = min(
+                self._persist_retry_backoff_s * 2.0,
+                self._max_persist_retry_backoff_s,
+            )
+            should_log = (
+                force
+                or self._last_persist_error_log_monotonic <= 0
+                or (now - self._last_persist_error_log_monotonic)
+                >= self._persist_error_log_interval_s
+            )
+            if should_log:
+                self._last_persist_error_log_monotonic = now
+                logger.warning("Falha ao persistir estado do detector: {}", exc)
             return False
 
         self._state_dirty = False
         self._last_state_persist_monotonic = time.monotonic()
+        self._persist_retry_not_before_monotonic = 0.0
+        self._persist_retry_backoff_s = 1.0
         return True
 
     def _restore_from_state(self, state: dict) -> None:

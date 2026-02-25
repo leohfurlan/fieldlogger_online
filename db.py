@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import oracledb
 
-from config import DB_DSN, DB_PASSWORD, DB_USER, logger
+from config import DB_DSN, DB_PASSWORD, DB_USER, ORACLE_DRIVER_MODE, logger
 
 MONITOR_OWNER = "ENGENHARIA"
 MONITOR_TABLE = "FIELDLOGGER_MONITOR"
@@ -77,7 +77,7 @@ def _get_pool():
             wait_timeout=_env_int("DB_POOL_WAIT_TIMEOUT_MS", 5000),
             getmode=oracledb.POOL_GETMODE_WAIT,
         )
-        logger.info("Oracle connection pool criado em thin mode.")
+        logger.info("Oracle connection pool criado em {} mode.", ORACLE_DRIVER_MODE)
 
     return _POOL
 

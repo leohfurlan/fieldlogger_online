@@ -21,7 +21,7 @@ Aplicacao FastAPI para monitoramento online de um FieldLogger via Modbus TCP, pe
 
 - Python 3.11+ (recomendado 3.12/3.13)
 - Oracle acessivel com credenciais validas
-- Driver `oracledb` em thin mode (padrao no projeto)
+- Driver `oracledb` em modo auto (tenta thick quando `ORACLE_CLIENT_LIB_DIR` existir)
 
 ## Instalacao
 
@@ -40,6 +40,8 @@ DB_DSN=SEU_DSN
 DB_USER=SEU_USUARIO
 DB_PASSWORD=SUA_SENHA
 APP_LOG_FILE=app.log
+ORACLE_CLIENT_LIB_DIR=C:\\oracle\\instantclient_23_9
+ORACLE_MODE=auto
 
 MODBUS_HOST=172.16.30.95
 MODBUS_PORT=502

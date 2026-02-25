@@ -28,6 +28,11 @@ class ReadingsBuffer:
         self._last_flush_monotonic = time.monotonic()
         self._failure_count = 0
         self._total_flushed = 0
+        self._retry_not_before_monotonic = 0.0
+        self._retry_backoff_s = 1.0
+        self._max_retry_backoff_s = 30.0
+        self._last_error_log_monotonic = 0.0
+        self._error_log_interval_s = 15.0
 
     @property
     def failure_count(self) -> int:
@@ -72,9 +77,12 @@ class ReadingsBuffer:
 
     def flush(self, force: bool = False) -> int:
         rows_to_flush: list[dict] = []
+        now = time.monotonic()
 
         with self._lock:
             if not self._rows:
+                return 0
+            if not force and now < self._retry_not_before_monotonic:
                 return 0
             if not force and len(self._rows) < self.max_batch_size:
                 elapsed = time.monotonic() - self._last_flush_monotonic
@@ -96,15 +104,28 @@ class ReadingsBuffer:
             with self._lock:
                 self._rows = rows_to_flush + self._rows
                 self._failure_count += 1
-            logger.error(
-                "Falha no flush de leituras em lote. pendentes={} falhas={} erro={}",
-                len(rows_to_flush),
-                self.failure_count,
-                exc,
-            )
+                self._retry_not_before_monotonic = now + self._retry_backoff_s
+                self._retry_backoff_s = min(
+                    self._retry_backoff_s * 2.0, self._max_retry_backoff_s
+                )
+                should_log = (
+                    force
+                    or self._last_error_log_monotonic <= 0
+                    or (now - self._last_error_log_monotonic) >= self._error_log_interval_s
+                )
+                if should_log:
+                    self._last_error_log_monotonic = now
+                    logger.error(
+                        "Falha no flush de leituras em lote. pendentes={} falhas={} erro={}",
+                        len(rows_to_flush),
+                        self._failure_count,
+                        exc,
+                    )
             return 0
 
         with self._lock:
             self._last_flush_monotonic = time.monotonic()
             self._total_flushed += inserted
+            self._retry_not_before_monotonic = 0.0
+            self._retry_backoff_s = 1.0
         return inserted
