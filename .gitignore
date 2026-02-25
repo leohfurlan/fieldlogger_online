@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+reset_table.py
+*.sql
+*.log
+importar_compostos_sankhya.py
+teste.py
+backfill_batch_id.py

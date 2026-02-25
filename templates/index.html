@@ -1,0 +1,702 @@
+﻿<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FieldLogger Online</title>
+
+  <!-- Tabulator (tabela editável + colunas arrastáveis + filtros + download xlsx) -->
+  <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
+
+  <!-- XLSX (necessário pro Tabulator exportar .xlsx) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Chart.js (gráfico) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0b1220;
+      --card: #121a2b;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --border: rgba(255,255,255,0.10);
+      --ok: #22c55e;
+      --bad: #ef4444;
+      --warn: #f59e0b;
+    }
+    body{
+      margin:0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header{
+      padding:16px 20px;
+      border-bottom: 1px solid var(--border);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    header h1{
+      margin:0;
+      font-size:18px;
+      font-weight:800;
+      letter-spacing:.2px;
+    }
+    .status{
+      font-size:12px;
+      color: var(--muted);
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .nav-link{
+      color: var(--text);
+      text-decoration:none;
+      font-weight:800;
+      font-size:12px;
+      border: 1px solid var(--border);
+      border-radius:999px;
+      padding:8px 12px;
+      background: rgba(255,255,255,0.06);
+      display:inline-flex;
+      align-items:center;
+    }
+    .nav-link:hover{ background: rgba(255,255,255,0.09); }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background: var(--bad);
+      display:inline-block;
+    }
+    .dot.ok{ background: var(--ok); }
+    .dot.warn{ background: var(--warn); }
+
+    .container{
+      padding:16px 20px 22px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .cards{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap:12px;
+    }
+    .card{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius:14px;
+      padding:12px 14px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-height:74px;
+    }
+    .card .label{
+      font-size:12px;
+      color: var(--muted);
+    }
+    .card .value{
+      font-size:22px;
+      font-weight:900;
+    }
+    .hint{
+      font-size:12px;
+      color: var(--muted);
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      padding:6px 10px;
+      border-radius:999px;
+      border: 1px solid var(--border);
+      width:max-content;
+      background: rgba(255,255,255,0.03);
+    }
+    .badge .state{ font-weight:800; }
+    .badge.on{ border-color: rgba(34,197,94,0.45); }
+    .badge.off{ border-color: rgba(239,68,68,0.45); }
+
+    .main{
+      display:grid;
+      grid-template-columns: 1fr 1fr; /* metade esquerda e direita */
+      gap:12px;
+      align-items:stretch;
+      height:560px;
+      min-height:560px;
+    }
+
+    .panel{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      height:100%;
+      min-height:0;
+      overflow:hidden;
+    }
+
+    .panel-title{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .panel-title h2{
+      margin:0;
+      font-size:14px;
+      font-weight:900;
+    }
+    .tools{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    button{
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding:8px 10px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:800;
+      font-size:12px;
+    }
+    button:hover{ background: rgba(255,255,255,0.09); }
+
+    input[type="text"]{
+      padding:8px 10px;
+      border-radius:10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      outline:none;
+      font-weight:700;
+      font-size:12px;
+      min-width:220px;
+    }
+
+    #chartWrap{
+      flex:1;
+      min-height:0;
+    }
+    canvas{ width:100% !important; height:100% !important; }
+
+    #table{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+    }
+
+    /* Tabulator theme tweaks */
+    .tabulator{
+      background: transparent;
+      border: none;
+      color: var(--text);
+      height: 100% !important;
+    }
+    .tabulator .tabulator-header{
+  background: #f3f4f6 !important;
+  border-bottom: 1px solid rgba(0,0,0,0.15) !important;
+  }
+  .tabulator .tabulator-header .tabulator-col{
+    border-right: 1px solid rgba(0,0,0,0.10) !important;
+  }
+  .tabulator .tabulator-header .tabulator-col .tabulator-col-title{
+    color: #000 !important;
+    font-weight: 900 !important;
+  }
+  .tabulator .tabulator-header .tabulator-col input{
+    background: #fff !important;
+    border: 1px solid rgba(0,0,0,0.18) !important;
+    color: #000 !important;
+  
+    }
+    .tabulator .tabulator-col{
+      background: transparent;
+      border-right: 1px solid var(--border);
+    }
+    .tabulator .tabulator-row{
+      background: transparent;
+      border-bottom: 1px solid var(--border);
+    }
+    .tabulator .tabulator-row.tabulator-row-even{
+      background: rgba(255,255,255,0.02);
+    }
+    .tabulator .tabulator-cell{
+      border-right: 1px solid var(--border);
+    }
+    .tabulator .tabulator-footer{
+      background: rgba(255,255,255,0.02);
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-title{
+      font-weight:900;
+      color: var(--text);
+    }
+    .tabulator .tabulator-header .tabulator-col input{
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text);
+      border-radius:8px;
+      padding:6px 8px;
+      margin-top:6px;
+      font-weight:700;
+    }
+
+    @media (max-width: 1100px){
+      .cards{ grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+      .main{ grid-template-columns: 1fr; }
+      input[type="text"]{ min-width: 160px; width: 100%; }
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>FieldLogger Online</h1>
+  <div class="status">
+    <a class="nav-link" href="/historico">Ir para histórico</a>
+    <span class="pill"><span id="wsDot" class="dot"></span><span id="wsStatus">Desconectado</span></span>
+    <span class="pill">Última leitura: <b id="lastTs">--</b></span>
+    <span class="pill">Pontos no gráfico: <b id="ptCount">0</b></span>
+  </div>
+</header>
+
+<div class="container">
+  <!-- Cards -->
+  <div class="cards">
+    <div class="card">
+      <div class="label">Temperatura</div>
+      <div class="value"><span id="tempVal">--</span> <span style="font-size:14px;color:var(--muted)">°C</span></div>
+      <div class="hint">Atual (tempo real)</div>
+    </div>
+    <div class="card">
+      <div class="label">Corrente</div>
+      <div class="value"><span id="corrVal">--</span> <span style="font-size:14px;color:var(--muted)">A</span></div>
+      <div class="hint">Atual (tempo real)</div>
+    </div>
+    <div class="card">
+      <div class="label">Tampa</div>
+      <div class="value" id="tampaBadgeWrap">--</div>
+      <div class="hint">Aberta / Fechada</div>
+    </div>
+    <div class="card">
+      <div class="label">Botão Start</div>
+      <div class="value" id="startBadgeWrap">--</div>
+      <div class="hint">Ativado / Desativado</div>
+    </div>
+  </div>
+
+  <!-- Metade esquerda = gráfico | metade direita = tabela -->
+  <div class="main">
+    <!-- Gráfico -->
+    <div class="panel">
+      <div class="panel-title">
+        <h2>Gráfico (tempo real)</h2>
+        <div class="tools">
+          <input id="rangeStart" type="datetime-local" />
+          <input id="rangeEnd" type="datetime-local" />
+          <button id="btnApplyRange">Aplicar</button>
+          <button id="btnLive">LIVE</button>
+          <button id="btnClearChart">Limpar gráfico</button>
+          <button id="btnPause">Pausar</button>
+        </div>
+      </div>
+      <div class="hint">
+        Temperatura no eixo esquerdo (0-200). Corrente, Tampa e Start no eixo direito (0-30).
+      </div>
+      <div id="chartWrap">
+        <canvas id="rtChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Tabela -->
+    <div class="panel">
+      <div class="panel-title">
+        <h2>Leituras</h2>
+        <div class="tools">
+          <input id="globalSearch" type="text" placeholder="Buscar na tabela..." />
+          <button id="btnClearFilters">Limpar filtros</button>
+          <button id="btnExportXlsx">Exportar Excel</button>
+          <button id="btnClearTable">Limpar tabela</button>
+        </div>
+      </div>
+      <div class="hint">
+        Arraste o cabealho para reordenar colunas. Clique no título para ordenar. Dê duplo clique na célula para editar.
+        Filtros por coluna ficam abaixo do título.
+      </div>
+      <div id="table"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- UTIL ----------
+  function nowIsoLocal() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  function fmt2(n){
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return "--";
+    return Number(n).toFixed(2);
+  }
+  function badgeOnOff(isOn, onLabel, offLabel){
+    const on = !!isOn;
+    return `<span class="badge ${on ? "on":"off"}">
+              <span class="dot ${on ? "ok":"bad"}" style="width:8px;height:8px"></span>
+              <span class="state">${on ? onLabel : offLabel}</span>
+            </span>`;
+  }
+
+  // ---------- STATE ----------
+  let paused = false;
+  const MAX_POINTS = 300;       // limite do gráfico
+  const MAX_TABLE_ROWS = 1500;  // limite de linhas (evita explodir memÃ³ria)
+
+  // ---------- RANGE + LIVE ----------
+  let live = true;
+
+  // buffer completo das leituras (Ãºltimas N)
+  const BUFFER_MAX = 5000;
+  const buffer = []; // cada item: {id, ts, temperatura, corrente, tampa, start, temp_raw, corr_raw}
+
+  const rangeStartEl = document.getElementById("rangeStart");
+  const rangeEndEl = document.getElementById("rangeEnd");
+  const btnApplyRange = document.getElementById("btnApplyRange");
+  const btnLive = document.getElementById("btnLive");
+
+  // helper: parse "YYYY-MM-DD HH:mm:ss" (Oracle) ou "YYYY-MM-DDTHH:mm"
+  function parseTs(s){
+    if(!s) return null;
+    // Oracle: "2026-02-24 12:15:47"
+    if (s.includes(" ") && !s.includes("T")){
+      return new Date(s.replace(" ", "T"));
+    }
+    // datetime-local: "2026-02-24T12:15"
+    return new Date(s);
+  }
+
+  function getRange(){
+    const s = parseTs(rangeStartEl.value);
+    const e = parseTs(rangeEndEl.value);
+    return {s, e};
+  }
+
+  function inRange(item, s, e){
+    const t = parseTs(item.ts);
+    if (!t || isNaN(t.getTime())) return false;
+    if (s && t < s) return false;
+    if (e && t > e) return false;
+    return true;
+  }
+
+  function applyRangeToUI(){
+    const {s, e} = getRange();
+    const filtered = buffer.filter(it => inRange(it, s, e));
+
+    // TABELA
+    table.setData(filtered.slice().reverse()); // mais recente em cima
+
+    // GRÃFICO: reconstrÃ³i
+    chartData.labels.length = 0;
+    chartData.datasets.forEach(ds => ds.data.length = 0);
+
+    const dataForChart = filtered.slice(-MAX_POINTS); // Ãºltimo trecho do range
+    for (const it of dataForChart){
+      const label = (it.ts || "").slice(11); // HH:mm:ss
+      chartData.labels.push(label);
+      chartData.datasets[0].data.push(it.corrente);
+      chartData.datasets[1].data.push(it.temperatura);
+      chartData.datasets[2].data.push(it.tampa);
+      chartData.datasets[3].data.push(it.start);
+    }
+    ptCount.textContent = chartData.labels.length;
+    rtChart.update("none");
+  }
+
+  function setLive(on){
+    live = on;
+    btnLive.textContent = live ? "LIVE (ON)" : "LIVE (OFF)";
+    btnLive.style.borderColor = live ? "rgba(34,197,94,0.45)" : "rgba(255,255,255,0.10)";
+    btnLive.style.background = live ? "rgba(34,197,94,0.10)" : "rgba(255,255,255,0.06)";
+
+    // quando liga live, ignora range e mostra Ãºltimo trecho
+    if (live){
+      rangeStartEl.value = "";
+      rangeEndEl.value = "";
+      applyRangeToUI();
+      wsStatus.textContent = "Online";
+      wsDot.classList.add("ok");
+      wsDot.classList.remove("warn");
+    } else {
+      wsStatus.textContent = "Modo histÃ³rico";
+      wsDot.classList.remove("ok");
+      wsDot.classList.add("warn");
+    }
+  }
+
+  btnApplyRange.onclick = () => {
+    setLive(false);
+    applyRangeToUI();
+  };
+
+  btnLive.onclick = () => setLive(!live);
+
+  // ---------- UI HOOKS ----------
+  const wsDot = document.getElementById("wsDot");
+  const wsStatus = document.getElementById("wsStatus");
+  const lastTs = document.getElementById("lastTs");
+  const ptCount = document.getElementById("ptCount");
+
+  const tempVal = document.getElementById("tempVal");
+  const corrVal = document.getElementById("corrVal");
+  const tampaBadgeWrap = document.getElementById("tampaBadgeWrap");
+  const startBadgeWrap = document.getElementById("startBadgeWrap");
+
+  const btnClearChart = document.getElementById("btnClearChart");
+  const btnPause = document.getElementById("btnPause");
+  const btnExportXlsx = document.getElementById("btnExportXlsx");
+  const btnClearTable = document.getElementById("btnClearTable");
+  const globalSearch = document.getElementById("globalSearch");
+  const btnClearFilters = document.getElementById("btnClearFilters");
+
+  // ---------- CHART ----------
+  const ctx = document.getElementById("rtChart");
+  const chartData = {
+    labels: [],
+    datasets: [
+      { label: "Corrente (A)", data: [], tension: 0.25, pointRadius: 0, yAxisID: "yRight" },
+      { label: "Temperatura (°C)", data: [], tension: 0.25, pointRadius: 0, yAxisID: "yTemp" },
+      { label: "Tampa (0/1)", data: [], stepped: true, pointRadius: 0, yAxisID: "yRight" },
+      { label: "Start (0/1)", data: [], stepped: true, pointRadius: 0, yAxisID: "yRight" },
+    ]
+  };
+
+  const rtChart = new Chart(ctx, {
+    type: "line",
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: "#e6edf3" } },
+        tooltip: { enabled: true }
+      },
+      scales: {
+        x: { ticks: { color: "#9aa4b2", maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,0.06)" } },
+        yTemp: {
+          position: "left",
+          min: 0,
+          max: 200,
+          ticks: { color: "#9aa4b2" },
+          grid: { color: "rgba(255,255,255,0.06)" },
+          title: { display: true, text: "Temperatura (°C)", color: "#9aa4b2" }
+        },
+        yRight: {
+          position: "right",
+          min: 0,
+          max: 30,
+          ticks: { color: "#9aa4b2" },
+          grid: { drawOnChartArea: false, color: "rgba(255,255,255,0.06)" },
+          title: { display: true, text: "Corrente / Tampa / Start", color: "#9aa4b2" }
+        }
+      }
+    }
+  });
+
+  function pushChartPoint(tsLabel, corrente, temp, tampa, start){
+    chartData.labels.push(tsLabel);
+    chartData.datasets[0].data.push(corrente);
+    chartData.datasets[1].data.push(temp);
+    chartData.datasets[2].data.push(tampa);
+    chartData.datasets[3].data.push(start);
+
+    if (chartData.labels.length > MAX_POINTS){
+      chartData.labels.shift();
+      chartData.datasets.forEach(ds => ds.data.shift());
+    }
+    ptCount.textContent = chartData.labels.length;
+    rtChart.update("none");
+  }
+
+  btnClearChart.onclick = () => {
+    chartData.labels.length = 0;
+    chartData.datasets.forEach(ds => ds.data.length = 0);
+    ptCount.textContent = "0";
+    rtChart.update("none");
+  };
+
+  btnPause.onclick = () => {
+    paused = !paused;
+    btnPause.textContent = paused ? "Retomar" : "Pausar";
+    wsDot.classList.toggle("warn", paused);
+    wsStatus.textContent = paused ? "Pausado (recebendo)" : "Online";
+  };
+
+  // ---------- TABLE (TABULATOR) ----------
+   const table = new Tabulator("#table", {
+    height: "100%",
+    layout: "fitDataStretch",
+    movableColumns: true,
+    reactiveData: false,
+    clipboard: true,
+    pagination: false,
+    columns: [
+      { title: "ID", field: "id", sorter: "number", headerFilter: "input", width: 90 },
+      { title: "Data/Hora", field: "ts", sorter: "string", headerFilter: "input", width: 170 },
+      { title: "Batch ID", field: "batch_id", sorter: "number", headerFilter: "input", hozAlign: "right", width: 110 },
+
+      { title: "Temperatura (°C)", field: "temperatura", sorter: "number", headerFilter: "input", hozAlign: "right" },
+      { title: "Corrente (A)", field: "corrente", sorter: "number", headerFilter: "input", hozAlign: "right" },
+
+      { title: "Tampa (0/1)", field: "tampa", sorter: "number", headerFilter: "input", hozAlign: "center", width: 120 },
+      { title: "Start (0/1)", field: "start", sorter: "number", headerFilter: "input", hozAlign: "center", width: 120 },
+
+      { title: "Temp RAW", field: "temp_raw", sorter: "number", headerFilter: "input", hozAlign: "right" },
+      { title: "Corr RAW", field: "corr_raw", sorter: "number", headerFilter: "input", hozAlign: "right" },
+    ],
+  });
+
+
+  btnExportXlsx.onclick = () => {
+    table.download("xlsx", "fieldlogger_monitor.xlsx", { sheetName: "Monitor" });
+  };
+
+  btnClearTable.onclick = () => {
+    table.clearData();
+  };
+
+  btnClearFilters.onclick = () => {
+    globalSearch.value = "";
+    table.clearFilter(true); // limpa filtros (inclui headerFilter)
+    table.clearSort();
+  };
+
+  // Busca global (procura em todas as colunas)
+  globalSearch.addEventListener("input", (e) => {
+    const q = (e.target.value || "").trim().toLowerCase();
+    if (!q) {
+      table.clearFilter(true);
+      return;
+    }
+    table.setFilter((data) => {
+      const vals = Object.values(data).join(" ").toLowerCase();
+      return vals.includes(q);
+    });
+  });
+
+  function addRow(row){
+    table.addRow(row, true); // true = add on top
+    const count = table.getDataCount();
+    if (count > MAX_TABLE_ROWS){
+      const rows = table.getRows();
+      rows[rows.length - 1].delete(); // remove do fim
+    }
+  }
+
+  // inicia com live on (apÃ³s chart + table estarem inicializados)
+  setLive(true);
+
+  // ---------- WS ----------
+  const wsProto = (location.protocol === "https:") ? "wss" : "ws";
+  const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    wsDot.classList.add("ok");
+    wsStatus.textContent = paused ? "Pausado (recebendo)" : "Online";
+  };
+
+  ws.onclose = () => {
+    wsDot.classList.remove("ok");
+    wsStatus.textContent = "Offline";
+  };
+
+  ws.onerror = () => {
+    wsDot.classList.remove("ok");
+    wsStatus.textContent = "Erro";
+  };
+
+  ws.onmessage = (ev) => {
+    let d;
+    try {
+      d = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+
+    if (d._status === "modbus_down") {
+      wsDot.classList.remove("ok");
+      wsDot.classList.add("warn");
+      wsStatus.textContent = "Modbus offline";
+      return;
+    }
+
+    const row = {
+      id: d.id ?? "",
+      ts: d.ts || nowIsoLocal(),
+      batch_id: d.batch_id ?? null,
+      temperatura: Number(d.temperatura_term),
+      corrente: Number(d.corrente),
+      tampa: d.tampa_descarga ? 1 : 0,
+      start: d.botao_start ? 1 : 0,
+      temp_raw: d.temperatura_term_raw ?? null,
+      corr_raw: d.corrente_raw ?? null,
+    };
+
+    buffer.push(row);
+    if (buffer.length > BUFFER_MAX) buffer.shift();
+
+    lastTs.textContent = row.ts;
+    tempVal.textContent = fmt2(row.temperatura);
+    corrVal.textContent = fmt2(row.corrente);
+    tampaBadgeWrap.innerHTML = badgeOnOff(row.tampa, "FECHADA", "ABERTA");
+    startBadgeWrap.innerHTML = badgeOnOff(row.start, "ON", "OFF");
+
+    if (paused) return;
+
+    if (live) {
+      pushChartPoint((row.ts || "").slice(11), row.corrente, row.temperatura, row.tampa, row.start);
+      table.addRow(row, true); // topo
+      if (table.getDataCount() > MAX_TABLE_ROWS){
+        const rows = table.getRows();
+        rows[rows.length - 1].delete();
+      }
+    }
+  };
+
+</script>
+</body>
+</html>
+

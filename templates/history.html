@@ -1,0 +1,849 @@
+﻿<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FieldLogger Historico</title>
+
+  <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0b1220;
+      --card: #121a2b;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --border: rgba(255,255,255,0.10);
+      --ok: #22c55e;
+      --warn: #f59e0b;
+    }
+    body{
+      margin:0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header{
+      padding:16px 20px;
+      border-bottom: 1px solid var(--border);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    header h1{
+      margin:0;
+      font-size:18px;
+      font-weight:800;
+      letter-spacing:.2px;
+    }
+    .status{
+      font-size:12px;
+      color: var(--muted);
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .nav-link{
+      color: var(--text);
+      text-decoration:none;
+      font-weight:800;
+      font-size:12px;
+      border: 1px solid var(--border);
+      border-radius:999px;
+      padding:8px 12px;
+      background: rgba(255,255,255,0.06);
+      display:inline-flex;
+      align-items:center;
+    }
+    .nav-link:hover{ background: rgba(255,255,255,0.09); }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background: var(--warn);
+      display:inline-block;
+    }
+    .dot.ok{ background: var(--ok); }
+
+    .container{
+      padding:16px 20px 22px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .main{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+      align-items:stretch;
+      height:560px;
+      min-height:560px;
+    }
+
+    .panel{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      height:100%;
+      min-height:0;
+      overflow:hidden;
+    }
+
+    .panel-title{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .panel-title h2{
+      margin:0;
+      font-size:14px;
+      font-weight:900;
+    }
+
+    .tools{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    button{
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding:8px 10px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:800;
+      font-size:12px;
+    }
+    button:hover{ background: rgba(255,255,255,0.09); }
+
+    select,
+    input[type="datetime-local"],
+    input[type="text"],
+    textarea{
+      padding:8px 10px;
+      border-radius:10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      outline:none;
+      font-weight:700;
+      font-size:12px;
+      min-width:170px;
+    }
+
+    textarea{
+      min-width:unset;
+      resize:vertical;
+      min-height:84px;
+    }
+
+    select:disabled{
+      opacity:.65;
+      cursor:not-allowed;
+    }
+
+    #chartWrap{
+      flex:1;
+      min-height:0;
+    }
+    canvas{ width:100% !important; height:100% !important; }
+
+    #table{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+    }
+
+    .hint{
+      font-size:12px;
+      color: var(--muted);
+    }
+
+    .tabulator{
+      background: transparent;
+      border: none;
+      color: var(--text);
+      height: 100% !important;
+    }
+    .tabulator .tabulator-header{
+      background: #f3f4f6 !important;
+      border-bottom: 1px solid rgba(0,0,0,0.15) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col{
+      border-right: 1px solid rgba(0,0,0,0.10) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-title{
+      color: #000 !important;
+      font-weight: 900 !important;
+    }
+    .tabulator .tabulator-row{
+      background: transparent;
+      border-bottom: 1px solid var(--border);
+    }
+    .tabulator .tabulator-row.tabulator-row-even{
+      background: rgba(255,255,255,0.02);
+    }
+    .tabulator .tabulator-cell{
+      border-right: 1px solid var(--border);
+    }
+
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background: rgba(4, 8, 16, 0.75);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+      z-index:1000;
+    }
+    .modal-backdrop.open{ display:flex; }
+    .modal-card{
+      width:min(640px, 100%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius:14px;
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.35);
+    }
+    .modal-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .modal-header h3{
+      margin:0;
+      font-size:16px;
+      font-weight:900;
+    }
+    .modal-form{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .modal-field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .modal-field span{
+      font-size:12px;
+      color: var(--muted);
+      font-weight:700;
+    }
+    .modal-field.full{
+      grid-column: 1 / -1;
+    }
+    .modal-actions{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+    }
+    .modal-status{
+      font-size:12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1100px){
+      .main{ grid-template-columns: 1fr; }
+      select,
+      input[type="datetime-local"],
+      input[type="text"],
+      textarea{ min-width: 140px; width: 100%; }
+      .modal-form{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>FieldLogger Historico</h1>
+  <div class="status">
+    <a class="nav-link" href="/">Voltar ao monitoramento</a>
+    <span class="pill"><span id="loadDot" class="dot"></span><span id="loadStatus">Carregando...</span></span>
+    <span class="pill">Registros: <b id="rowCount">0</b></span>
+    <span class="pill">Ultimo TS: <b id="lastTs">--</b></span>
+  </div>
+</header>
+
+<div class="container">
+  <div class="main">
+    <div class="panel">
+      <div class="panel-title">
+        <h2>Grafico de linhas (historico)</h2>
+        <div class="tools">
+          <button id="btnReload">Recarregar</button>
+          <button id="btnResetZoom">Redesenhar</button>
+        </div>
+      </div>
+      <div class="hint">Temperatura no eixo esquerdo (0-200). Corrente, Tampa e Start no eixo direito (0-30).</div>
+      <div id="chartWrap">
+        <canvas id="historyChart"></canvas>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        <h2>Tabela Historica</h2>
+        <div class="tools">
+          <button id="btnApplyFilters">Aplicar filtros</button>
+          <button id="btnAssignComposto">Vincular composto ao batch</button>
+          <button id="btnClearFilters">Limpar filtros</button>
+          <button id="btnExportXlsx">Exportar Excel</button>
+        </div>
+      </div>
+      <div class="tools" style="justify-content:flex-start;">
+        <select id="selLote" title="Lote">
+          <option value="">Todos os lotes</option>
+        </select>
+        <select id="selComposto" title="Composto">
+          <option value="">Todos os compostos</option>
+        </select>
+        <select id="selBatch" title="Batch ID">
+          <option value="">Todos os batches</option>
+        </select>
+        <input id="rangeStart" type="datetime-local" title="Data/hora inicio" />
+        <input id="rangeEnd" type="datetime-local" title="Data/hora fim" />
+      </div>
+      <div class="hint">Filtros por selecao e periodo. Nao ha filtro por caixa de texto na tabela.</div>
+      <div id="table"></div>
+    </div>
+  </div>
+</div>
+
+<div id="assignModal" class="modal-backdrop" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="assignModalTitle">
+    <div class="modal-header">
+      <h3 id="assignModalTitle">Vincular Composto ao Batch</h3>
+      <button id="btnAssignClose" type="button">Fechar</button>
+    </div>
+    <div class="modal-form">
+      <label class="modal-field">
+        <span>Batch ID</span>
+        <select id="assignBatch" title="Batch ID">
+          <option value="">Selecione um batch</option>
+        </select>
+      </label>
+      <label class="modal-field">
+        <span>Composto</span>
+        <select id="assignComposto" title="Composto">
+          <option value="">Selecione um composto</option>
+        </select>
+      </label>
+      <label class="modal-field full">
+        <span>Lote</span>
+        <input id="assignLote" type="text" maxlength="120" placeholder="Ex.: LOTE-2026-001" />
+      </label>
+      <label class="modal-field full">
+        <span>Observacoes</span>
+        <textarea id="assignObservacoes" maxlength="500" placeholder="Informacoes complementares do batch"></textarea>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <span id="assignModalStatus" class="modal-status"></span>
+      <div class="tools">
+        <button id="btnAssignCancel" type="button">Cancelar</button>
+        <button id="btnAssignSave" type="button">Salvar vinculo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function fmt2(n){
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return "--";
+    return Number(n).toFixed(2);
+  }
+
+  function asNum(v){
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const loadDot = document.getElementById("loadDot");
+  const loadStatus = document.getElementById("loadStatus");
+  const rowCount = document.getElementById("rowCount");
+  const lastTs = document.getElementById("lastTs");
+
+  const selLote = document.getElementById("selLote");
+  const selComposto = document.getElementById("selComposto");
+  const selBatch = document.getElementById("selBatch");
+  const rangeStart = document.getElementById("rangeStart");
+  const rangeEnd = document.getElementById("rangeEnd");
+  const assignModal = document.getElementById("assignModal");
+  const assignBatch = document.getElementById("assignBatch");
+  const assignComposto = document.getElementById("assignComposto");
+  const assignLote = document.getElementById("assignLote");
+  const assignObservacoes = document.getElementById("assignObservacoes");
+  const assignModalStatus = document.getElementById("assignModalStatus");
+  const btnAssignSave = document.getElementById("btnAssignSave");
+
+  const chartData = {
+    labels: [],
+    datasets: [
+      { label: "Corrente (A)", data: [], tension: 0.25, pointRadius: 0, yAxisID: "yRight" },
+      { label: "Temperatura (°C)", data: [], tension: 0.25, pointRadius: 0, yAxisID: "yTemp" },
+      { label: "Tampa (0/1)", data: [], stepped: true, pointRadius: 0, yAxisID: "yRight" },
+      { label: "Start (0/1)", data: [], stepped: true, pointRadius: 0, yAxisID: "yRight" },
+    ]
+  };
+
+  const historyChart = new Chart(document.getElementById("historyChart"), {
+    type: "line",
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: "#e6edf3" } },
+        tooltip: { enabled: true }
+      },
+      scales: {
+        x: { ticks: { color: "#9aa4b2", maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,0.06)" } },
+        yTemp: {
+          position: "left",
+          min: 0,
+          max: 200,
+          ticks: { color: "#9aa4b2" },
+          grid: { color: "rgba(255,255,255,0.06)" },
+          title: { display: true, text: "Temperatura (°C)", color: "#9aa4b2" }
+        },
+        yRight: {
+          position: "right",
+          min: 0,
+          max: 30,
+          ticks: { color: "#9aa4b2" },
+          grid: { drawOnChartArea: false, color: "rgba(255,255,255,0.06)" },
+          title: { display: true, text: "Corrente / Tampa / Start", color: "#9aa4b2" }
+        }
+      }
+    }
+  });
+
+  const table = new Tabulator("#table", {
+    height: "100%",
+    layout: "fitDataStretch",
+    movableColumns: true,
+    reactiveData: false,
+    clipboard: true,
+    pagination: false,
+    columns: [
+      { title: "ID", field: "id", sorter: "number", width: 90 },
+      { title: "Data/Hora", field: "ts", sorter: "string", width: 170 },
+      { title: "Batch ID", field: "batch_id", sorter: "number", hozAlign: "right", width: 110 },
+      { title: "Composto", field: "composto", sorter: "string", width: 240 },
+      { title: "Lote", field: "lote", sorter: "string", width: 180 },
+      { title: "Observacoes", field: "observacoes", sorter: "string", widthGrow: 2, minWidth: 220 },
+      { title: "Temperatura (°C)", field: "temperatura", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
+      { title: "Corrente (A)", field: "corrente", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
+      { title: "Tampa (0/1)", field: "tampa", sorter: "number", hozAlign: "center", width: 120 },
+      { title: "Start (0/1)", field: "start", sorter: "number", hozAlign: "center", width: 120 },
+      { title: "Temp RAW", field: "temp_raw", sorter: "number", hozAlign: "right" },
+      { title: "Corr RAW", field: "corr_raw", sorter: "number", hozAlign: "right" },
+    ],
+  });
+
+  function rebuildChart(rowsDesc){
+    chartData.labels.length = 0;
+    chartData.datasets.forEach(ds => ds.data.length = 0);
+
+    const rowsAsc = rowsDesc.slice().reverse();
+    for (const row of rowsAsc){
+      chartData.labels.push(row.ts || "");
+      chartData.datasets[0].data.push(asNum(row.corrente));
+      chartData.datasets[1].data.push(asNum(row.temperatura));
+      chartData.datasets[2].data.push(asNum(row.tampa));
+      chartData.datasets[3].data.push(asNum(row.start));
+    }
+    historyChart.update("none");
+  }
+
+  function setSelectOptions(selectEl, values, defaultLabel, columnName){
+    const previousValue = selectEl.value;
+    selectEl.innerHTML = "";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = columnName ? defaultLabel : `${defaultLabel} (indisponivel)`;
+    selectEl.appendChild(defaultOption);
+
+    if (!columnName){
+      selectEl.disabled = true;
+      selectEl.value = "";
+      return;
+    }
+
+    selectEl.disabled = false;
+    for (const value of values){
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = value;
+      selectEl.appendChild(opt);
+    }
+
+    const hasPrevious = values.includes(previousValue);
+    selectEl.value = hasPrevious ? previousValue : "";
+  }
+
+  function buildPeriodParams(){
+    const params = new URLSearchParams();
+    if (rangeStart.value) params.set("start", rangeStart.value);
+    if (rangeEnd.value) params.set("end", rangeEnd.value);
+    return params;
+  }
+
+  function buildHistoryParams(){
+    const params = buildPeriodParams();
+    if (!selLote.disabled && selLote.value) params.set("lote", selLote.value);
+    if (!selComposto.disabled && selComposto.value) params.set("composto", selComposto.value);
+    if (!selBatch.disabled && selBatch.value) params.set("batch_id", selBatch.value);
+    return params;
+  }
+
+  async function loadFilterOptions(){
+    const params = buildPeriodParams();
+    const query = params.toString();
+    const url = query ? `/api/history/options?${query}` : "/api/history/options";
+
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const payload = await res.json();
+    const columns = payload.columns || {};
+    const options = payload.options || {};
+
+    setSelectOptions(selLote, Array.isArray(options.lote) ? options.lote : [], "Todos os lotes", columns.lote);
+    setSelectOptions(selComposto, Array.isArray(options.composto) ? options.composto : [], "Todos os compostos", columns.composto);
+    setSelectOptions(selBatch, Array.isArray(options.batch_id) ? options.batch_id : [], "Todos os batches", columns.batch_id);
+  }
+
+  function setModalSelectOptions(selectEl, values, defaultLabel){
+    const previousValue = selectEl.value;
+    selectEl.innerHTML = "";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = defaultLabel;
+    selectEl.appendChild(defaultOption);
+
+    for (const value of values){
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = value;
+      selectEl.appendChild(opt);
+    }
+
+    selectEl.disabled = values.length === 0;
+    if (values.includes(previousValue)) {
+      selectEl.value = previousValue;
+    } else {
+      selectEl.value = "";
+    }
+  }
+
+  function setModalCompostos(items){
+    const previousValue = assignComposto.value;
+    assignComposto.innerHTML = "";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = "Selecione um composto";
+    assignComposto.appendChild(defaultOption);
+
+    for (const item of items){
+      const opt = document.createElement("option");
+      if (item.codigo !== undefined && item.codigo !== null && item.codigo !== "") {
+        opt.value = String(item.codigo);
+        opt.dataset.codprod = String(item.codigo);
+      } else {
+        opt.value = String(item.descricao || "");
+      }
+      opt.dataset.descricao = String(item.descricao || "");
+      opt.textContent = item.codigo ? `[${item.codigo}] ${item.descricao}` : String(item.descricao || "");
+      assignComposto.appendChild(opt);
+    }
+
+    assignComposto.disabled = items.length === 0;
+    if (Array.from(assignComposto.options).some((opt) => opt.value === previousValue)) {
+      assignComposto.value = previousValue;
+    } else {
+      assignComposto.value = "";
+    }
+  }
+
+  async function loadAssignModalOptions(){
+    assignModalStatus.textContent = "Carregando opcoes...";
+    btnAssignSave.disabled = true;
+
+    const [historyRes, compostosRes] = await Promise.all([
+      fetch("/api/history/options", { cache: "no-store" }),
+      fetch("/api/compostos", { cache: "no-store" }),
+    ]);
+
+    if (!historyRes.ok) throw new Error(`HTTP ${historyRes.status} (history/options)`);
+
+    const historyPayload = await historyRes.json();
+    const historyOptions = historyPayload.options || {};
+
+    const batchValues = (Array.isArray(historyOptions.batch_id) ? historyOptions.batch_id : [])
+      .map((v) => String(v).trim())
+      .filter((v) => v.length > 0)
+      .sort((a, b) => {
+        const na = Number(a);
+        const nb = Number(b);
+        if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+        return a.localeCompare(b, "pt-BR");
+      });
+    setModalSelectOptions(assignBatch, batchValues, "Selecione um batch");
+
+    const catalogItems = [];
+    if (compostosRes.ok) {
+      const compostosPayload = await compostosRes.json();
+      const items = Array.isArray(compostosPayload.items) ? compostosPayload.items : [];
+      for (const item of items){
+        if (!item || !item.descricao) continue;
+        catalogItems.push({
+          codigo: item.codigo,
+          descricao: String(item.descricao).trim(),
+        });
+      }
+    }
+
+    if (catalogItems.length > 0) {
+      setModalCompostos(catalogItems);
+    } else {
+      const fallbackCompostos = (Array.isArray(historyOptions.composto) ? historyOptions.composto : [])
+        .map((desc) => ({ codigo: null, descricao: String(desc || "").trim() }))
+        .filter((item) => item.descricao.length > 0);
+      setModalCompostos(fallbackCompostos);
+    }
+
+    if (selBatch.value && Array.from(assignBatch.options).some((opt) => opt.value === selBatch.value)) {
+      assignBatch.value = selBatch.value;
+    }
+
+    if (selComposto.value) {
+      const selected = Array.from(assignComposto.options).find(
+        (opt) => (opt.dataset.descricao || "").toUpperCase() === selComposto.value.trim().toUpperCase()
+      );
+      if (selected) assignComposto.value = selected.value;
+    }
+
+    if (!assignLote.value && selLote.value) {
+      assignLote.value = selLote.value;
+    }
+
+    assignModalStatus.textContent = "";
+    btnAssignSave.disabled = assignBatch.disabled || assignComposto.disabled;
+  }
+
+  async function openAssignModal(){
+    assignLote.value = selLote.value || "";
+    assignObservacoes.value = "";
+    assignModal.classList.add("open");
+    assignModal.setAttribute("aria-hidden", "false");
+    try {
+      await loadAssignModalOptions();
+    } catch (err) {
+      assignModalStatus.textContent = `Erro ao carregar opcoes: ${err.message}`;
+      btnAssignSave.disabled = true;
+    }
+  }
+
+  function closeAssignModal(){
+    assignModal.classList.remove("open");
+    assignModal.setAttribute("aria-hidden", "true");
+    assignModalStatus.textContent = "";
+  }
+
+  function ignoredMessages(payload){
+    const out = [];
+    const filters = payload.filters || {};
+    for (const key of ["lote", "composto", "batch_id"]){
+      const meta = filters[key];
+      if (meta && meta.requested && !meta.applied && meta.ignored_reason){
+        out.push(meta.ignored_reason);
+      }
+    }
+    return out;
+  }
+
+  async function loadHistory(){
+    loadStatus.textContent = "Carregando...";
+    loadDot.classList.remove("ok");
+
+    try {
+      const params = buildHistoryParams();
+      const query = params.toString();
+      const url = query ? `/api/history?${query}` : "/api/history";
+
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const payload = await res.json();
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
+
+      table.setData(rows);
+      rebuildChart(rows);
+
+      rowCount.textContent = String(rows.length);
+      lastTs.textContent = rows.length ? rows[0].ts : "--";
+
+      const ignored = ignoredMessages(payload);
+      loadStatus.textContent = ignored.length ? `Historico carregado (${ignored.join(" | ")})` : "Historico carregado";
+      loadDot.classList.add("ok");
+    } catch (err) {
+      loadStatus.textContent = `Erro ao carregar: ${err.message}`;
+      loadDot.classList.remove("ok");
+    }
+  }
+
+  document.getElementById("btnApplyFilters").onclick = async () => {
+    await loadHistory();
+    try {
+      await loadFilterOptions();
+    } catch {}
+  };
+
+  document.getElementById("btnAssignComposto").onclick = async () => {
+    await openAssignModal();
+  };
+
+  document.getElementById("btnAssignClose").onclick = closeAssignModal;
+  document.getElementById("btnAssignCancel").onclick = closeAssignModal;
+  assignModal.onclick = (ev) => {
+    if (ev.target === assignModal) closeAssignModal();
+  };
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && assignModal.classList.contains("open")) {
+      closeAssignModal();
+    }
+  });
+
+  btnAssignSave.onclick = async () => {
+    if (!assignBatch.value) {
+      assignModalStatus.textContent = "Selecione um batch.";
+      return;
+    }
+    if (!assignComposto.value) {
+      assignModalStatus.textContent = "Selecione um composto.";
+      return;
+    }
+
+    const selectedComposto = assignComposto.options[assignComposto.selectedIndex];
+    const params = new URLSearchParams();
+    if (selectedComposto && selectedComposto.dataset.codprod) {
+      params.set("codprod", selectedComposto.dataset.codprod);
+    } else {
+      const descricao = (selectedComposto?.dataset.descricao || assignComposto.value || "").trim();
+      if (descricao) params.set("descricao", descricao);
+    }
+
+    const lote = assignLote.value.trim();
+    const observacoes = assignObservacoes.value.trim();
+    if (lote) params.set("lote", lote);
+    if (observacoes) params.set("observacoes", observacoes);
+
+    loadStatus.textContent = "Vinculando composto...";
+    loadDot.classList.remove("ok");
+    assignModalStatus.textContent = "Salvando vinculo...";
+    btnAssignSave.disabled = true;
+
+    try {
+      const query = params.toString();
+      const url = query
+        ? `/api/batches/${encodeURIComponent(assignBatch.value)}/composto?${query}`
+        : `/api/batches/${encodeURIComponent(assignBatch.value)}/composto`;
+      const res = await fetch(url, { method: "POST" });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.detail || `HTTP ${res.status}`);
+      }
+
+      assignModalStatus.textContent = "";
+      closeAssignModal();
+
+      const updatedRows = Number(payload.updated_rows || 0);
+      loadStatus.textContent = `Batch ${assignBatch.value} atualizado (${updatedRows} linhas).`;
+      loadDot.classList.add("ok");
+      await loadFilterOptions();
+      await loadHistory();
+    } catch (err) {
+      assignModalStatus.textContent = `Erro: ${err.message}`;
+      loadStatus.textContent = `Erro ao vincular: ${err.message}`;
+      loadDot.classList.remove("ok");
+    } finally {
+      btnAssignSave.disabled = false;
+    }
+  };
+
+  document.getElementById("btnReload").onclick = async () => {
+    try {
+      await loadFilterOptions();
+    } catch {}
+    await loadHistory();
+  };
+
+  document.getElementById("btnResetZoom").onclick = () => rebuildChart(table.getData());
+
+  document.getElementById("btnExportXlsx").onclick = () => {
+    table.download("xlsx", "fieldlogger_historico.xlsx", { sheetName: "Historico" });
+  };
+
+  document.getElementById("btnClearFilters").onclick = async () => {
+    selLote.value = "";
+    selComposto.value = "";
+    selBatch.value = "";
+    rangeStart.value = "";
+    rangeEnd.value = "";
+    try {
+      await loadFilterOptions();
+    } catch {}
+    await loadHistory();
+  };
+
+  (async () => {
+    try {
+      await loadFilterOptions();
+    } catch {}
+    await loadHistory();
+  })();
+</script>
+</body>
+</html>
