@@ -2,8 +2,13 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Set
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -41,11 +46,43 @@ except ModuleNotFoundError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# -------- MODBUS CONFIG --------
-MODBUS_HOST = "172.16.30.95"
-MODBUS_PORT = 502
-MODBUS_UNIT_ID = 255  # seu Unit ID correto
-POLL_SECONDS = 1.0
+def _env_str(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    text = value.strip()
+    if not text:
+        return default
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        text = text[1:-1].strip()
+    return text or default
+
+
+def _env_int(name: str, default: int) -> int:
+    text = _env_str(name, str(default))
+    try:
+        return int(text)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Variavel de ambiente invalida: {name}='{text}'. Informe numero inteiro."
+        ) from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    text = _env_str(name, str(default))
+    try:
+        return float(text)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Variavel de ambiente invalida: {name}='{text}'. Informe numero."
+        ) from exc
+
+
+# -------- MODBUS CONFIG (via .env) --------
+MODBUS_HOST = _env_str("MODBUS_HOST", "172.16.30.95")
+MODBUS_PORT = _env_int("MODBUS_PORT", 502)
+MODBUS_UNIT_ID = _env_int("MODBUS_UNIT_ID", 255)
+POLL_SECONDS = _env_float("POLL_SECONDS", 1.0)
 
 # -------- WS CLIENTS --------
 ws_clients: Set[WebSocket] = set()
