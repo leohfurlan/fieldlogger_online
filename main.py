@@ -115,7 +115,8 @@ MODBUS_UNIT_ID = _env_int("MODBUS_UNIT_ID", 255)
 MODBUS_TIMEOUT_S = _env_float("MODBUS_TIMEOUT_S", 5.0)
 POLL_SECONDS = _env_float("POLL_SECONDS", 1.0)
 READINGS_BATCH_SIZE = _env_int("READINGS_BATCH_SIZE", 100)
-READINGS_FLUSH_INTERVAL_S = _env_float("READINGS_FLUSH_INTERVAL_S", 2.0)
+READINGS_FLUSH_INTERVAL_S = _env_float("READINGS_FLUSH_INTERVAL_S", 3.0)
+READINGS_QUEUE_LIMIT = _env_int("READINGS_QUEUE_LIMIT", 5000)
 CYCLE_STATE_PERSIST_INTERVAL_S = _env_float("CYCLE_STATE_PERSIST_INTERVAL_S", 10.0)
 CYCLE_STALE_TIMEOUT_S = _env_float("CYCLE_STALE_TIMEOUT_S", 2 * 60 * 60)
 CYCLE_SIGNATURE_SAMPLE_EVERY = _env_int("CYCLE_SIGNATURE_SAMPLE_EVERY", 10)
@@ -128,6 +129,7 @@ ws_clients: Set[WebSocket] = set()
 readings_buffer = ReadingsBuffer(
     max_batch_size=READINGS_BATCH_SIZE,
     flush_interval_s=READINGS_FLUSH_INTERVAL_S,
+    max_queue_size=READINGS_QUEUE_LIMIT,
 )
 cycle_detector = CycleLifecycleManager(
     db_layer=db_layer,
@@ -173,12 +175,19 @@ async def poller() -> None:
         try:
             if not await asyncio.to_thread(fl.connect):
                 raise RuntimeError("Falha ao conectar no Modbus TCP (connect=False).")
+            logger.bind(component="poller", event="modbus_connected").info(
+                "Conexao Modbus estabelecida host={} port={} unit_id={}",
+                MODBUS_HOST,
+                MODBUS_PORT,
+                MODBUS_UNIT_ID,
+            )
             last_db_tick_monotonic = 0.0
             last_sync_monotonic = 0.0
 
             while True:
                 loop_started_monotonic = time.monotonic()
                 data = await asyncio.to_thread(fl.read)
+                data["_modbus_status"] = "OK"
                 start_event = False
                 end_event = False
 
@@ -226,6 +235,7 @@ async def poller() -> None:
                 except Exception as exc:
                     # Nao derruba tempo real por falha de banco
                     data["_db_error"] = str(exc)
+                data["_db_status"] = readings_buffer.db_status
 
                 await broadcaster(data)
 
@@ -270,7 +280,18 @@ async def poller() -> None:
                 await asyncio.to_thread(fl.close)
             except Exception:
                 pass
-            await broadcaster({"_status": "modbus_down", "_error": str(exc)})
+            logger.bind(component="poller", event="modbus_failure").error(
+                "Falha de comunicacao Modbus: {}",
+                exc,
+            )
+            await broadcaster(
+                {
+                    "_status": "modbus_down",
+                    "_modbus_status": "FAIL",
+                    "_db_status": readings_buffer.db_status,
+                    "_error": str(exc),
+                }
+            )
             await asyncio.sleep(2.0)
 
 
@@ -280,13 +301,21 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(ensure_compostos_schema)
     except Exception as exc:
         logger.warning("Falha ao garantir schema de compostos: {}", exc)
+        readings_buffer.mark_db_down("schema_compostos", exc)
 
     try:
         await asyncio.to_thread(ensure_cycle_tracking_schema)
     except Exception as exc:
         logger.warning("Falha ao garantir schema de ciclo: {}", exc)
+        readings_buffer.mark_db_down("schema_cycle", exc)
 
-    await asyncio.to_thread(cycle_detector.startup)
+    try:
+        await asyncio.to_thread(cycle_detector.startup)
+    except Exception as exc:
+        readings_buffer.mark_db_down("cycle_startup", exc)
+        logger.warning("Falha no startup do detector de ciclo: {}", exc)
+    else:
+        readings_buffer.mark_db_up("cycle_startup")
 
     task = asyncio.create_task(poller())
     yield
