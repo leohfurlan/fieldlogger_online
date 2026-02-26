@@ -913,6 +913,114 @@ def close_batch_auto_after_downtime(
     return {"updated_rows": updated, "batch_id": int(batch_id)}
 
 
+def fetch_batch_meta(batch_id: int) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                  BATCH_ID,
+                  START_TS,
+                  END_TS,
+                  DURATION_S,
+                  MAX_TEMP,
+                  MAX_CORRENTE,
+                  AVG_TEMP,
+                  AVG_CORRENTE,
+                  SIGNATURE,
+                  OP,
+                  OPERADOR,
+                  OBSERVACOES,
+                  CREATED_AT
+                FROM {BATCHES_TABLE_FQN}
+                WHERE BATCH_ID = :batch_id
+                """,
+                batch_id=int(batch_id),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "batch_id": _to_int_if_numeric(row[0]),
+        "start_ts": row[1],
+        "end_ts": row[2],
+        "duration_s": _to_number(row[3]),
+        "max_temp": _to_number(row[4]),
+        "max_corrente": _to_number(row[5]),
+        "avg_temp": _to_number(row[6]),
+        "avg_corrente": _to_number(row[7]),
+        "signature": str(row[8]).strip() if row[8] is not None else None,
+        "op": str(row[9]).strip() if row[9] is not None else None,
+        "operador": str(row[10]).strip() if row[10] is not None else None,
+        "observacoes": str(row[11]).strip() if row[11] is not None else None,
+        "created_at": row[12],
+    }
+
+
+def fetch_batch_readings(batch_id: int) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            optional_cols = _detect_optional_filter_columns(cur)
+            batch_col = optional_cols["batch_id"]
+            if not batch_col:
+                return []
+
+            cur.execute(
+                f"""
+                SELECT
+                  ID,
+                  TS,
+                  TEMPERATURA_C,
+                  CORRENTE,
+                  BOTAO_START,
+                  TAMPA_DESCARGA,
+                  TEMP_RAW,
+                  CORRENTE_RAW
+                FROM {MONITOR_TABLE_FQN}
+                WHERE TRIM(TO_CHAR({batch_col})) = :batch_id
+                ORDER BY TS ASC, ID ASC
+                """,
+                batch_id=str(int(batch_id)),
+            )
+            rows = cur.fetchall()
+
+    out = []
+    for row in rows:
+        out.append(
+            {
+                "id": _to_number(row[0]),
+                "ts": row[1],
+                "temp": _to_number(row[2]),
+                "corrente": _to_number(row[3]),
+                "start_signal": _to_number(row[4]),
+                "lid_signal": _to_number(row[5]),
+                "temp_raw": _to_number(row[6]),
+                "corr_raw": _to_number(row[7]),
+            }
+        )
+    return out
+
+
+def update_batch_signature_if_empty(batch_id: int, signature: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE {BATCHES_TABLE_FQN}
+                SET SIGNATURE = :signature
+                WHERE BATCH_ID = :batch_id
+                  AND (SIGNATURE IS NULL OR TRIM(SIGNATURE) = '')
+                """,
+                signature=signature,
+                batch_id=int(batch_id),
+            )
+            updated = int(cur.rowcount or 0)
+        conn.commit()
+    return updated
+
+
 def fetch_batch_runtime_state() -> dict:
     """
     Lê o estado recente para continuar sequência de batch após restart da aplicação.

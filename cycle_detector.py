@@ -144,6 +144,11 @@ class CycleLifecycleManager:
         self._last_sync_error_log_monotonic = 0.0
         self._sync_error_log_interval_s = 15.0
 
+    def has_pending_db_sync(self) -> bool:
+        if self.active_cycle and self.active_cycle.batch_id is None:
+            return True
+        return any(not cycle.db_closed for cycle in self.pending_cycles)
+
     def startup(self) -> dict:
         state = None
         try:
@@ -219,9 +224,9 @@ class CycleLifecycleManager:
 
     def sync_db(self, readings_buffer) -> bool:
         targets: list[CycleRecord] = []
-        if self.active_cycle is not None:
+        if self.active_cycle is not None and self.active_cycle.batch_id is None:
             targets.append(self.active_cycle)
-        targets.extend(self.pending_cycles)
+        targets.extend([cycle for cycle in self.pending_cycles if not cycle.db_closed])
 
         if not targets:
             return True

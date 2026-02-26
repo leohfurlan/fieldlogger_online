@@ -1,6 +1,6 @@
-# fieldlogger_online (app)
+﻿# fieldlogger_online (app)
 
-Aplicacao FastAPI para monitoramento online de um FieldLogger via Modbus TCP, persistencia no Oracle e consulta de historico com filtros e rastreio por batch.
+Aplicacao FastAPI para monitoramento online de um FieldLogger via Modbus TCP, persistencia no Oracle e analise de ciclos por batch.
 
 ## Funcionalidades
 
@@ -13,9 +13,15 @@ Aplicacao FastAPI para monitoramento online de um FieldLogger via Modbus TCP, pe
   - Regra de tampa usada: `1 = fechada`, `0 = aberta`
 - Buffer de leituras com `executemany` (menos carga no Oracle)
 - Estado do detector de ciclo persistido em `ENGENHARIA.APP_STATE`
-- Tabela `ENGENHARIA.FIELDLOGGER_BATCHES` (1 linha por ciclo)
-- Catalogo de compostos (`FIELDLOGGER_COMPOSTOS`) e vinculo ao batch
-- Vinculo de `composto`, `lote` e `observacoes` para todas as linhas de um `batch_id`
+- Catalogo de compostos (`FIELDLOGGER_COMPOSTOS`) e vinculo por batch
+- Relatorio automatico por batch (1 clique):
+  - PDF (cabecalho, metricas, eventos, grafico)
+  - Excel (`Resumo`, `Eventos`, `Leituras` opcional)
+- Assinatura de ciclo + comparacao com batch padrao:
+  - Reamostragem em tempo normalizado `0..100%` com 101 pontos
+  - Hash SHA-256 da serie quantizada
+  - Overlay baseline vs target no frontend
+  - Metricas de desvio (RMSE, deltas de duracao/AUC/picos)
 
 ## Requisitos
 
@@ -46,6 +52,7 @@ ORACLE_MODE=auto
 MODBUS_HOST=172.16.30.95
 MODBUS_PORT=502
 MODBUS_UNIT_ID=255
+MODBUS_TIMEOUT_S=5
 POLL_SECONDS=1
 
 READINGS_BATCH_SIZE=100
@@ -87,43 +94,103 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 Acesse:
 
 - Monitoramento online: `http://localhost:8000/`
-- Historico: `http://localhost:8000/historico`
+- Historico + comparacao: `http://localhost:8000/historico`
+
+## Rotas novas (relatorio e assinatura)
+
+- `GET /api/batches/{batch_id}/report?format=pdf|xlsx&include_raw=0|1`
+- `GET /api/batches/{batch_id}/signature`
+- `GET /api/batches/compare?baseline_batch_id={id}&target_batch_id={id}`
+
+## Exemplos curl
+
+```bash
+# PDF 1-clique
+curl -L "http://localhost:8000/api/batches/123/report?format=pdf" -o batch_123.pdf
+
+# Excel 1-clique com leituras cruas
+curl -L "http://localhost:8000/api/batches/123/report?format=xlsx&include_raw=1" -o batch_123.xlsx
+
+# Assinatura + perfil normalizado
+curl "http://localhost:8000/api/batches/123/signature"
+
+# Comparacao baseline x target
+curl "http://localhost:8000/api/batches/compare?baseline_batch_id=120&target_batch_id=123"
+```
+
+## Validacao da UI
+
+1. Abra `/historico`.
+2. Filtre um `Batch ID` e teste os botoes `Baixar PDF batch` e `Baixar Excel batch`.
+3. Em `Comparar ciclos`, selecione `Batch padrao` e `Batch alvo`.
+4. Clique `Comparar` e valide:
+   - overlay de temperatura e corrente (0-100%)
+   - cards de RMSE e deltas
+   - linhas verticais de estagios (rampa/plato/descarga), quando inferidas.
 
 ## Testes
 
-Teste unitario minimo do detector de ciclo:
+Testes unitarios minimos:
+
+- detector de ciclo
+- reamostragem `0..100%` com 101 pontos
+- assinatura igual/diferente
 
 ```bash
 pytest -q
 ```
 
-## Validacao rapida no Oracle
+## Consultas Oracle de verificacao
 
-1. Execute a aplicacao e gere um ciclo real (start -> fim).
-2. Verifique se batches foram criados e fechados:
+### 1) Assinaturas salvas em batches
 
 ```sql
-SELECT batch_id, start_ts, end_ts, duration_s, max_temp, avg_temp, signature
+SELECT batch_id, start_ts, end_ts, signature, duration_s
 FROM engenharia.fieldlogger_batches
 ORDER BY batch_id DESC;
 ```
 
-3. Verifique leituras vinculadas ao ciclo:
+### 2) Dados usados no relatorio (meta + metricas base)
 
 ```sql
-SELECT batch_id, COUNT(*) AS total
-FROM engenharia.fieldlogger_monitor
-GROUP BY batch_id
-ORDER BY batch_id DESC;
+SELECT
+  b.batch_id,
+  b.op,
+  b.operador,
+  b.start_ts,
+  b.end_ts,
+  b.duration_s,
+  b.max_temp,
+  b.max_corrente,
+  b.avg_temp,
+  b.avg_corrente
+FROM engenharia.fieldlogger_batches b
+WHERE b.batch_id = :batch_id;
 ```
 
-4. Verifique estado persistido do detector:
+### 3) Leituras do batch para conferir exportacoes
 
 ```sql
-SELECT key, DBMS_LOB.SUBSTR(value, 4000, 1) AS value_json, updated_at
-FROM engenharia.app_state
-WHERE key = 'cycle_detector_state';
+SELECT
+  m.id,
+  m.ts,
+  m.temperatura_c,
+  m.corrente,
+  m.botao_start,
+  m.tampa_descarga,
+  m.batch_id
+FROM engenharia.fieldlogger_monitor m
+WHERE m.batch_id = :batch_id
+ORDER BY m.ts, m.id;
 ```
+
+## Screenshots (opcional)
+
+Sugestao de capturas para documentacao interna:
+
+- `historico` com botao de download por batch
+- secao `Comparar ciclos` com overlay e cards de desvio
+- exemplo de PDF exportado
 
 ## Scripts de apoio
 
@@ -135,7 +202,7 @@ WHERE key = 'cycle_detector_state';
   - `python vincular_composto_batch.py <batch_id> --codprod <CODPROD> --lote <LOTE> --observacoes "<TEXTO>"`
   - ou `--descricao "<DESCRICAO>"`
 
-## Principais rotas API
+## Rotas API principais
 
 - `GET /health/db`
 - `GET /health/modbus`
@@ -144,10 +211,14 @@ WHERE key = 'cycle_detector_state';
 - `GET /api/compostos`
 - `POST /api/compostos/import?grupo=18011100`
 - `POST /api/batches/{batch_id}/composto?codprod=...&lote=...&observacoes=...`
+- `GET /api/batches/{batch_id}/report?format=pdf|xlsx&include_raw=0|1`
+- `GET /api/batches/{batch_id}/signature`
+- `GET /api/batches/compare?baseline_batch_id=...&target_batch_id=...`
 
 ## Observacoes tecnicas
 
-- O frontend atual foi mantido (sem quebra de compatibilidade).
+- Rotas antigas e painel atual foram mantidos.
+- `energy_proxy` no relatorio/comparacao usa integral trapezoidal da corrente ao longo do tempo (AUC corrente).
 - Insercoes de leitura usam `executemany` e commit por lote.
 - Em falha Oracle, o buffer de leituras permanece em memoria e tenta novamente no proximo flush.
 - O detector persiste estado em eventos de start/end, periodicamente durante ciclo ativo e no shutdown.

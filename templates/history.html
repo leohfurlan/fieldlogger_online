@@ -9,105 +9,396 @@
   <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 
   <style>
     :root{
       --bg: #0b1220;
-      --card: #121a2b;
+      --surface: #121a2b;
+      --surface-soft: #0f1728;
       --text: #e6edf3;
-      --muted: #9aa4b2;
-      --border: rgba(255,255,255,0.10);
+      --muted: #97a3b8;
+      --border: rgba(255,255,255,0.12);
       --ok: #22c55e;
       --warn: #f59e0b;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
     }
+
+    *{ box-sizing: border-box; }
+
     body{
       margin:0;
-      font-family: Arial, sans-serif;
+      font-family: "Segoe UI", Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
     }
-    header{
-      padding:16px 20px;
+
+    a{ color: inherit; }
+
+    button,
+    select,
+    input,
+    textarea{
+      font: inherit;
+    }
+
+    button{
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding:8px 12px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:700;
+      font-size:12px;
+      line-height:1.2;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      transition: background .2s ease;
+    }
+
+    button:hover{ background: rgba(255,255,255,0.10); }
+
+    .btn-primary{
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover{
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .topbar{
+      position:fixed;
+      inset:0 0 auto 0;
+      z-index:900;
+      background: rgba(11, 18, 32, 0.96);
       border-bottom: 1px solid var(--border);
+      display:grid;
+      grid-template-columns: auto 1fr auto;
+      align-items:center;
+      gap:14px;
+      padding:10px 20px;
+      min-height:74px;
+      backdrop-filter: blur(6px);
+    }
+
+    .topbar-left{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .topbar-left h1{
+      margin:0;
+      font-size:18px;
+      font-weight:800;
+      letter-spacing:.2px;
+      white-space:nowrap;
+    }
+
+    .nav-link{
+      text-decoration:none;
+      border: 1px solid var(--border);
+      border-radius:999px;
+      padding:7px 12px;
+      background: rgba(255,255,255,0.05);
+      font-size:12px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+
+    .nav-link:hover{ background: rgba(255,255,255,0.10); }
+
+    .topbar-center{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:2px;
+      min-width:0;
+    }
+
+    .topbar-label{
+      font-size:11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .35px;
+      font-weight:700;
+    }
+
+    #periodSummary{
+      font-size:13px;
+      font-weight:700;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:100%;
+    }
+
+    .topbar-right{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:8px;
+      flex-wrap:wrap;
+      min-width:0;
+    }
+
+    .status-chip,
+    .meta-chip{
+      border: 1px solid var(--border);
+      border-radius:999px;
+      background: rgba(255,255,255,0.03);
+      font-size:11px;
+      color: var(--muted);
+      padding:4px 10px;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:28px;
+    }
+
+    .status-chip{
+      max-width:320px;
+    }
+
+    #loadStatus{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      max-width:220px;
+    }
+
+    .dot{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      background: var(--warn);
+      display:inline-block;
+      flex-shrink:0;
+    }
+
+    .dot.ok{ background: var(--ok); }
+
+    .page{
+      padding:90px 20px 24px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .filters-panel{
+      border: 1px solid var(--border);
+      border-radius:12px;
+      background: var(--surface);
+      overflow:hidden;
+    }
+
+    .filters-panel > summary{
+      list-style:none;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:12px 14px;
+      cursor:pointer;
+      font-size:14px;
+      font-weight:800;
+      user-select:none;
+    }
+
+    .filters-panel > summary::-webkit-details-marker{ display:none; }
+    .filters-panel > summary::after{
+      content: "+";
+      font-size:16px;
+      color: var(--muted);
+      line-height:1;
+    }
+
+    .filters-panel[open] > summary::after{ content: "-"; }
+
+    .summary-meta{
+      font-size:11px;
+      color: var(--muted);
+      font-weight:600;
+      margin-right:auto;
+      margin-left:10px;
+    }
+
+    .filters-body{
+      border-top: 1px solid var(--border);
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .filters-grid{
+      display:grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap:10px;
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+    }
+
+    .field span{
+      font-size:11px;
+      color: var(--muted);
+      font-weight:700;
+      text-transform: uppercase;
+      letter-spacing:.35px;
+    }
+
+    select,
+    input[type="datetime-local"],
+    input[type="text"],
+    textarea{
+      width:100%;
+      padding:8px 10px;
+      border-radius:10px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      outline:none;
+      font-size:12px;
+      font-weight:600;
+    }
+
+    select:disabled{
+      opacity:.65;
+      cursor:not-allowed;
+    }
+
+    textarea{
+      resize:vertical;
+      min-height:84px;
+    }
+
+    .filters-actions{
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+    }
+
+    .content-panel{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .content-header{
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:12px;
       flex-wrap:wrap;
     }
-    header h1{
+
+    .content-header h2{
       margin:0;
-      font-size:18px;
+      font-size:16px;
       font-weight:800;
-      letter-spacing:.2px;
+      letter-spacing:.15px;
     }
-    .status{
-      font-size:12px;
-      color: var(--muted);
+
+    .content-actions{
       display:flex;
       align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
       justify-content:flex-end;
-    }
-    .nav-link{
-      color: var(--text);
-      text-decoration:none;
-      font-weight:800;
-      font-size:12px;
-      border: 1px solid var(--border);
-      border-radius:999px;
-      padding:8px 12px;
-      background: rgba(255,255,255,0.06);
-      display:inline-flex;
-      align-items:center;
-    }
-    .nav-link:hover{ background: rgba(255,255,255,0.09); }
-    .pill{
-      padding:4px 10px;
-      border-radius:999px;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.03);
-      display:inline-flex;
-      align-items:center;
       gap:8px;
+      flex-wrap:wrap;
     }
-    .dot{
-      width:10px;
-      height:10px;
-      border-radius:50%;
-      background: var(--warn);
-      display:inline-block;
-    }
-    .dot.ok{ background: var(--ok); }
 
-    .container{
-      padding:16px 20px 22px;
+    .column-manager-wrap{
+      position:relative;
+    }
+
+    .column-manager{
+      position:absolute;
+      top:calc(100% + 6px);
+      right:0;
+      z-index:1300;
+      width:min(320px, 90vw);
+      max-height:340px;
+      overflow:auto;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background: var(--surface-soft);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.45);
+      padding:10px;
       display:flex;
       flex-direction:column;
-      gap:12px;
+      gap:8px;
     }
 
-    .main{
+    .column-manager[hidden]{ display:none; }
+
+    .column-manager-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding-bottom:6px;
+      border-bottom:1px solid var(--border);
+    }
+
+    .column-manager-head strong{
+      font-size:12px;
+      letter-spacing:.2px;
+    }
+
+    .column-manager-list{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      padding-right:2px;
+    }
+
+    .column-toggle{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      color: var(--text);
+    }
+
+    .column-toggle input{
+      width:14px;
+      height:14px;
+      margin:0;
+    }
+
+    .hidden-action{ display:none; }
+    .hidden-action.show{ display:inline-flex; }
+
+    .analysis-grid{
       display:grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
       gap:12px;
       align-items:stretch;
-      height:560px;
-      min-height:560px;
     }
 
     .panel{
-      background: var(--card);
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius:14px;
+      border-radius:12px;
       padding:12px;
       display:flex;
       flex-direction:column;
       gap:10px;
-      height:100%;
-      min-height:0;
-      overflow:hidden;
+      min-width:0;
     }
 
     .panel-title{
@@ -117,73 +408,101 @@
       gap:10px;
       flex-wrap:wrap;
     }
-    .panel-title h2{
+
+    .panel-title h3{
       margin:0;
       font-size:14px;
-      font-weight:900;
-    }
-
-    .tools{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      flex-wrap:wrap;
-      justify-content:flex-end;
-    }
-
-    button{
-      background: rgba(255,255,255,0.06);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding:8px 10px;
-      border-radius:10px;
-      cursor:pointer;
       font-weight:800;
-      font-size:12px;
     }
-    button:hover{ background: rgba(255,255,255,0.09); }
 
-    select,
-    input[type="datetime-local"],
-    input[type="text"],
-    textarea{
-      padding:8px 10px;
-      border-radius:10px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.03);
-      color: var(--text);
-      outline:none;
+    .panel-tools{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .info-icon{
+      width:20px;
+      height:20px;
+      border-radius:50%;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.05);
+      color: var(--muted);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
       font-weight:700;
-      font-size:12px;
-      min-width:170px;
+      cursor:default;
+      user-select:none;
     }
 
-    textarea{
-      min-width:unset;
-      resize:vertical;
-      min-height:84px;
+    .chart-panel #chartWrap{
+      height:360px;
+      min-height:360px;
+      max-height:360px;
     }
 
-    select:disabled{
-      opacity:.65;
-      cursor:not-allowed;
+    .chart-panel canvas,
+    .compare-chart-wrap canvas{
+      width:100% !important;
+      height:100% !important;
     }
 
-    #chartWrap{
-      flex:1;
-      min-height:0;
-    }
-    canvas{ width:100% !important; height:100% !important; }
-
-    #table{
-      flex:1;
-      min-height:0;
-      overflow:auto;
+    .table-panel #table{
+      height:360px;
+      min-height:360px;
+      max-height:360px;
+      overflow:hidden;
     }
 
-    .hint{
+    .inline-status{
       font-size:12px;
       color: var(--muted);
+    }
+
+    .compare-grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+      min-height:300px;
+    }
+
+    .compare-chart-wrap{
+      min-height:300px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+    }
+    .compare-metrics{
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap:10px;
+    }
+
+    .metric-card{
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding:10px;
+      background: rgba(255,255,255,0.03);
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+
+    .metric-label{
+      font-size:11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      font-weight: 700;
+    }
+
+    .metric-value{
+      font-size:16px;
+      font-weight:900;
     }
 
     .tabulator{
@@ -192,26 +511,78 @@
       color: var(--text);
       height: 100% !important;
     }
+
     .tabulator .tabulator-header{
+      position: sticky;
+      top: 0;
+      z-index: 3;
       background: #f3f4f6 !important;
       border-bottom: 1px solid rgba(0,0,0,0.15) !important;
     }
+
     .tabulator .tabulator-header .tabulator-col{
       border-right: 1px solid rgba(0,0,0,0.10) !important;
     }
+
     .tabulator .tabulator-header .tabulator-col .tabulator-col-title{
       color: #000 !important;
       font-weight: 900 !important;
     }
+
     .tabulator .tabulator-row{
       background: transparent;
       border-bottom: 1px solid var(--border);
     }
+
     .tabulator .tabulator-row.tabulator-row-even{
       background: rgba(255,255,255,0.02);
     }
+
     .tabulator .tabulator-cell{
       border-right: 1px solid var(--border);
+    }
+
+    .row-menu-trigger{
+      width:30px;
+      height:26px;
+      padding:0;
+      border-radius:8px;
+      font-size:16px;
+      line-height:1;
+    }
+
+    .row-action-menu{
+      position:fixed;
+      z-index:1200;
+      display:none;
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius:10px;
+      box-shadow: 0 18px 36px rgba(0,0,0,0.4);
+      min-width:220px;
+      padding:6px;
+    }
+
+    .row-action-menu.open{ display:block; }
+
+    .row-action-menu button{
+      width:100%;
+      border:none;
+      background: transparent;
+      justify-content:flex-start;
+      padding:8px 10px;
+      border-radius:8px;
+      font-size:12px;
+      font-weight:700;
+    }
+
+    .row-action-menu button:hover{ background: rgba(255,255,255,0.10); }
+
+    .tools{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
     }
 
     .modal-backdrop{
@@ -224,10 +595,12 @@
       padding:16px;
       z-index:1000;
     }
+
     .modal-backdrop.open{ display:flex; }
+
     .modal-card{
       width:min(640px, 100%);
-      background: var(--card);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius:14px;
       padding:14px;
@@ -236,112 +609,267 @@
       gap:12px;
       box-shadow: 0 24px 48px rgba(0,0,0,0.35);
     }
+
     .modal-header{
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:10px;
     }
+
     .modal-header h3{
       margin:0;
       font-size:16px;
       font-weight:900;
     }
+
     .modal-form{
       display:grid;
       grid-template-columns: 1fr 1fr;
       gap:10px;
     }
+
     .modal-field{
       display:flex;
       flex-direction:column;
       gap:6px;
     }
+
     .modal-field span{
       font-size:12px;
       color: var(--muted);
       font-weight:700;
     }
-    .modal-field.full{
-      grid-column: 1 / -1;
-    }
+
+    .modal-field.full{ grid-column: 1 / -1; }
+
     .modal-actions{
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:8px;
     }
+
     .modal-status{
       font-size:12px;
       color: var(--muted);
     }
 
-    @media (max-width: 1100px){
-      .main{ grid-template-columns: 1fr; }
-      select,
-      input[type="datetime-local"],
-      input[type="text"],
-      textarea{ min-width: 140px; width: 100%; }
+    @media (max-width: 1200px){
+      .filters-grid{ grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+      .analysis-grid{ grid-template-columns: 1fr; }
+      .chart-panel #chartWrap,
+      .table-panel #table{
+        height:340px;
+        min-height:340px;
+        max-height:340px;
+      }
+    }
+
+    @media (max-width: 900px){
+      .topbar{
+        grid-template-columns: 1fr;
+        align-items:flex-start;
+        gap:6px;
+        padding:10px 14px;
+      }
+
+      .topbar-center,
+      .topbar-right{ justify-content:flex-start; align-items:flex-start; }
+
+      .page{ padding:146px 14px 18px; }
+
+      .filters-grid{ grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+      .compare-grid{ grid-template-columns: 1fr; min-height:0; }
+      .compare-metrics{ grid-template-columns: 1fr 1fr; }
       .modal-form{ grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px){
+      .filters-grid{ grid-template-columns: 1fr; }
+      .content-actions{ width:100%; justify-content:flex-start; }
+      .column-manager{
+        right:auto;
+        left:0;
+      }
+      .status-chip,
+      .meta-chip{ max-width:100%; }
+      #loadStatus{ max-width:140px; }
+      .chart-panel #chartWrap,
+      .table-panel #table{
+        height:300px;
+        min-height:300px;
+        max-height:300px;
+      }
+      .compare-chart-wrap{ min-height:260px; }
+      .compare-metrics{ grid-template-columns: 1fr; }
     }
   </style>
 </head>
 
 <body>
-<header>
-  <h1>FieldLogger Historico</h1>
-  <div class="status">
-    <a class="nav-link" href="/">Voltar ao monitoramento</a>
-    <span class="pill"><span id="loadDot" class="dot"></span><span id="loadStatus">Carregando...</span></span>
-    <span class="pill">Registros: <b id="rowCount">0</b></span>
-    <span class="pill">Ultimo TS: <b id="lastTs">--</b></span>
+<header class="topbar">
+  <div class="topbar-left">
+    <a class="nav-link" href="/">Voltar</a>
+    <h1>Historico</h1>
+  </div>
+
+  <div class="topbar-center">
+    <span class="topbar-label">Periodo selecionado</span>
+    <strong id="periodSummary">-- -> --</strong>
+  </div>
+
+  <div class="topbar-right">
+    <span class="status-chip"><span id="loadDot" class="dot"></span><span id="loadStatus">Carregando...</span></span>
+    <span class="meta-chip">Registros: <b id="rowCount">0</b></span>
+    <span class="meta-chip">Ultimo TS: <b id="lastTs">--</b></span>
+    <button id="btnReload" class="btn-primary" type="button">Recarregar</button>
   </div>
 </header>
-
-<div class="container">
-  <div class="main">
-    <div class="panel">
-      <div class="panel-title">
-        <h2>Grafico de linhas (historico)</h2>
-        <div class="tools">
-          <button id="btnReload">Recarregar</button>
-          <button id="btnResetZoom">Redesenhar</button>
-        </div>
+<main class="page">
+  <details id="filtersPanel" class="filters-panel">
+    <summary>
+      <span>Filtros</span>
+      <span class="summary-meta">Periodo, lote, composto e batch</span>
+    </summary>
+    <div class="filters-body">
+      <div class="filters-grid">
+        <label class="field">
+          <span>Inicio</span>
+          <input id="rangeStart" type="datetime-local" title="Data/hora inicio" />
+        </label>
+        <label class="field">
+          <span>Fim</span>
+          <input id="rangeEnd" type="datetime-local" title="Data/hora fim" />
+        </label>
+        <label class="field">
+          <span>Lote</span>
+          <select id="selLote" title="Lote">
+            <option value="">Todos os lotes</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Composto</span>
+          <select id="selComposto" title="Composto">
+            <option value="">Todos os compostos</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Batch</span>
+          <select id="selBatch" title="Batch ID">
+            <option value="">Todos os batches</option>
+          </select>
+        </label>
       </div>
-      <div class="hint">Temperatura no eixo esquerdo (0-200). Corrente, Tampa e Start no eixo direito (0-30).</div>
-      <div id="chartWrap">
-        <canvas id="historyChart"></canvas>
+      <div class="filters-actions">
+        <button id="btnApplyFilters" class="btn-primary" type="button">Aplicar</button>
+        <button id="btnClearFilters" type="button">Limpar</button>
+      </div>
+    </div>
+  </details>
+
+  <section class="content-panel">
+    <div class="content-header">
+      <h2>Analise de batches</h2>
+      <div class="content-actions">
+        <button id="btnAssignComposto" class="hidden-action" type="button">Vincular composto</button>
+        <div class="column-manager-wrap">
+          <button id="btnManageCols" type="button">Colunas</button>
+          <div id="columnManager" class="column-manager" hidden aria-hidden="true">
+            <div class="column-manager-head">
+              <strong>Colunas visiveis</strong>
+              <button id="btnShowAllCols" type="button">Mostrar todas</button>
+            </div>
+            <div id="columnManagerList" class="column-manager-list"></div>
+          </div>
+        </div>
+        <button id="btnBatchPdf" type="button">PDF batch</button>
+        <button id="btnBatchXlsx" type="button">Excel batch</button>
+        <button id="btnExportXlsx" class="btn-primary" type="button">Exportar Excel</button>
       </div>
     </div>
 
-    <div class="panel">
+    <div class="analysis-grid">
+      <article class="panel chart-panel">
+        <div class="panel-title">
+          <h3>Grafico historico</h3>
+          <div class="panel-tools">
+            <span class="info-icon" title="Zoom: rolagem do mouse ou arrastar no grafico. Pan horizontal: arrastar com Shift pressionado ou usar os botoes ◀ ▶." aria-label="Informacao">ℹ</span>
+            <button id="btnZoomIn" type="button">+</button>
+            <button id="btnZoomOut" type="button">-</button>
+            <button id="btnPanLeft" type="button">◀</button>
+            <button id="btnPanRight" type="button">▶</button>
+            <button id="btnResetZoom" type="button">Resetar visao</button>
+          </div>
+        </div>
+        <div id="chartWrap">
+          <canvas id="historyChart"></canvas>
+        </div>
+      </article>
+
+      <article class="panel table-panel">
+        <div class="panel-title">
+          <h3>Tabela historica</h3>
+          <div class="panel-tools">
+            <span class="info-icon" title="Tabela com todas as colunas disponiveis, controle de visibilidade e rolagem interna." aria-label="Informacao">ℹ</span>
+          </div>
+        </div>
+        <div id="table"></div>
+      </article>
+    </div>
+
+    <article class="panel compare-panel">
       <div class="panel-title">
-        <h2>Tabela Historica</h2>
-        <div class="tools">
-          <button id="btnApplyFilters">Aplicar filtros</button>
-          <button id="btnAssignComposto">Vincular composto ao batch</button>
-          <button id="btnClearFilters">Limpar filtros</button>
-          <button id="btnExportXlsx">Exportar Excel</button>
+        <h3>Comparar ciclos</h3>
+        <div class="panel-tools">
+          <select id="cmpBaselineBatch" title="Batch padrao">
+            <option value="">Batch padrao</option>
+          </select>
+          <select id="cmpTargetBatch" title="Batch alvo">
+            <option value="">Batch alvo</option>
+          </select>
+          <button id="btnCompareBatches" class="btn-primary" type="button">Comparar</button>
+          <span class="info-icon" title="Compara assinatura, perfil e metricas entre dois batches." aria-label="Informacao">ℹ</span>
         </div>
       </div>
-      <div class="tools" style="justify-content:flex-start;">
-        <select id="selLote" title="Lote">
-          <option value="">Todos os lotes</option>
-        </select>
-        <select id="selComposto" title="Composto">
-          <option value="">Todos os compostos</option>
-        </select>
-        <select id="selBatch" title="Batch ID">
-          <option value="">Todos os batches</option>
-        </select>
-        <input id="rangeStart" type="datetime-local" title="Data/hora inicio" />
-        <input id="rangeEnd" type="datetime-local" title="Data/hora fim" />
+      <div id="compareStatus" class="inline-status">Selecione dois batches para comparar.</div>
+      <div class="compare-grid">
+        <div class="compare-chart-wrap">
+          <canvas id="compareTempChart"></canvas>
+        </div>
+        <div class="compare-chart-wrap">
+          <canvas id="compareCorrChart"></canvas>
+        </div>
       </div>
-      <div class="hint">Filtros por selecao e periodo. Nao ha filtro por caixa de texto na tabela.</div>
-      <div id="table"></div>
-    </div>
-  </div>
-</div>
+      <div class="compare-metrics">
+        <div class="metric-card">
+          <span class="metric-label">RMSE Temp</span>
+          <span id="metricRmseTemp" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">RMSE Corrente</span>
+          <span id="metricRmseCorr" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Delta Duracao (s)</span>
+          <span id="metricDeltaDuration" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Delta AUC Corrente</span>
+          <span id="metricDeltaAuc" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Delta Pico Temp</span>
+          <span id="metricDeltaPeakTemp" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Delta Pico Corrente</span>
+          <span id="metricDeltaPeakCorr" class="metric-value">--</span>
+        </div>
+      </div>
+    </article>
+  </section>
+</main>
 
 <div id="assignModal" class="modal-backdrop" aria-hidden="true">
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="assignModalTitle">
@@ -381,10 +909,22 @@
   </div>
 </div>
 
+<div id="rowActionMenu" class="row-action-menu" aria-hidden="true">
+  <button id="btnRowAssignComposto" type="button">Vincular composto ao batch</button>
+</div>
+
 <script>
   function fmt2(n){
     if (n === null || n === undefined || Number.isNaN(Number(n))) return "--";
     return Number(n).toFixed(2);
+  }
+
+  function fmtSigned(n, digits = 3){
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return "--";
+    const num = Number(n);
+    if (!Number.isFinite(num)) return "--";
+    if (num > 0) return `+${num.toFixed(digits)}`;
+    return num.toFixed(digits);
   }
 
   function asNum(v){
@@ -393,6 +933,54 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  function pad2(value){
+    return String(value).padStart(2, "0");
+  }
+
+  function parseInputDateTime(value){
+    if (!value) return null;
+    const [datePart, timePart] = String(value).split("T");
+    if (!datePart) return null;
+
+    const [year, month, day] = datePart.split("-").map((part) => Number(part));
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+
+    let hours = 0;
+    let minutes = 0;
+    if (timePart) {
+      const [hourPart, minutePart] = timePart.split(":");
+      hours = Number(hourPart);
+      minutes = Number(minutePart);
+      if (!Number.isFinite(hours)) hours = 0;
+      if (!Number.isFinite(minutes)) minutes = 0;
+    }
+
+    return new Date(year, month - 1, day, hours, minutes);
+  }
+
+  function formatDateShort(value){
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "--";
+    return `${pad2(value.getDate())}/${pad2(value.getMonth() + 1)}/${value.getFullYear()}`;
+  }
+
+  function formatTopbarTs(value){
+    if (value === null || value === undefined || value === "") return "--";
+    const raw = String(value).trim();
+    if (!raw) return "--";
+
+    const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) return raw;
+
+    return `${pad2(parsed.getDate())}/${pad2(parsed.getMonth() + 1)} ${pad2(parsed.getHours())}:${pad2(parsed.getMinutes())}`;
+  }
+
+  function normalizeBatchId(value){
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
+  }
+
+  const periodSummary = document.getElementById("periodSummary");
   const loadDot = document.getElementById("loadDot");
   const loadStatus = document.getElementById("loadStatus");
   const rowCount = document.getElementById("rowCount");
@@ -403,6 +991,8 @@
   const selBatch = document.getElementById("selBatch");
   const rangeStart = document.getElementById("rangeStart");
   const rangeEnd = document.getElementById("rangeEnd");
+  const btnAssignComposto = document.getElementById("btnAssignComposto");
+
   const assignModal = document.getElementById("assignModal");
   const assignBatch = document.getElementById("assignBatch");
   const assignComposto = document.getElementById("assignComposto");
@@ -410,6 +1000,106 @@
   const assignObservacoes = document.getElementById("assignObservacoes");
   const assignModalStatus = document.getElementById("assignModalStatus");
   const btnAssignSave = document.getElementById("btnAssignSave");
+
+  const cmpBaselineBatch = document.getElementById("cmpBaselineBatch");
+  const cmpTargetBatch = document.getElementById("cmpTargetBatch");
+  const compareStatus = document.getElementById("compareStatus");
+  const metricRmseTemp = document.getElementById("metricRmseTemp");
+  const metricRmseCorr = document.getElementById("metricRmseCorr");
+  const metricDeltaDuration = document.getElementById("metricDeltaDuration");
+  const metricDeltaAuc = document.getElementById("metricDeltaAuc");
+  const metricDeltaPeakTemp = document.getElementById("metricDeltaPeakTemp");
+  const metricDeltaPeakCorr = document.getElementById("metricDeltaPeakCorr");
+
+  const rowActionMenu = document.getElementById("rowActionMenu");
+  const btnRowAssignComposto = document.getElementById("btnRowAssignComposto");
+  const btnManageCols = document.getElementById("btnManageCols");
+  const columnManager = document.getElementById("columnManager");
+  const columnManagerList = document.getElementById("columnManagerList");
+  const btnShowAllCols = document.getElementById("btnShowAllCols");
+  const btnZoomIn = document.getElementById("btnZoomIn");
+  const btnZoomOut = document.getElementById("btnZoomOut");
+  const btnPanLeft = document.getElementById("btnPanLeft");
+  const btnPanRight = document.getElementById("btnPanRight");
+
+  let rowMenuBatchId = "";
+  let rowMenuLote = "";
+  let historyAbortController = null;
+  let filterOptionsAbortController = null;
+  let historyLoadSeq = 0;
+  let filterOptionsLoadSeq = 0;
+  let optionsPeriodSignature = "";
+  let columnManagerOpen = false;
+  const HISTORY_CHART_MAX_POINTS = 1600;
+
+  function updatePeriodSummary(){
+    const startText = formatDateShort(parseInputDateTime(rangeStart.value));
+    const endText = formatDateShort(parseInputDateTime(rangeEnd.value));
+    periodSummary.textContent = `${startText} -> ${endText}`;
+  }
+
+  function updateAssignActionVisibility(){
+    const hasSelectedBatch = !selBatch.disabled && normalizeBatchId(selBatch.value) !== "";
+    btnAssignComposto.classList.toggle("show", hasSelectedBatch);
+    btnAssignComposto.disabled = !hasSelectedBatch;
+  }
+
+  function getPeriodSignature(){
+    return `${rangeStart.value || ""}|${rangeEnd.value || ""}`;
+  }
+
+  function setColumnManagerOpen(isOpen){
+    columnManagerOpen = Boolean(isOpen);
+    columnManager.hidden = !columnManagerOpen;
+    columnManager.setAttribute("aria-hidden", columnManagerOpen ? "false" : "true");
+    btnManageCols.setAttribute("aria-expanded", columnManagerOpen ? "true" : "false");
+  }
+
+  function toggleColumnManager(){
+    setColumnManagerOpen(!columnManagerOpen);
+  }
+
+  function hideRowActionMenu(){
+    rowActionMenu.classList.remove("open");
+    rowActionMenu.setAttribute("aria-hidden", "true");
+    rowMenuBatchId = "";
+    rowMenuLote = "";
+  }
+
+  function showRowActionMenu(event, rowData){
+    const batchId = normalizeBatchId(rowData?.batch_id);
+    if (!batchId) {
+      hideRowActionMenu();
+      return;
+    }
+
+    rowMenuBatchId = batchId;
+    rowMenuLote = rowData?.lote ? String(rowData.lote).trim() : "";
+
+    rowActionMenu.classList.add("open");
+    rowActionMenu.setAttribute("aria-hidden", "false");
+    rowActionMenu.style.left = "0px";
+    rowActionMenu.style.top = "0px";
+
+    const rect = rowActionMenu.getBoundingClientRect();
+    const margin = 8;
+    const clickX = Number(event?.clientX || 0);
+    const clickY = Number(event?.clientY || 0);
+
+    let left = clickX;
+    let top = clickY + 8;
+
+    if (left + rect.width > window.innerWidth - margin) {
+      left = window.innerWidth - rect.width - margin;
+    }
+
+    if (top + rect.height > window.innerHeight - margin) {
+      top = clickY - rect.height - 8;
+    }
+
+    rowActionMenu.style.left = `${Math.max(margin, left)}px`;
+    rowActionMenu.style.top = `${Math.max(margin, top)}px`;
+  }
 
   const chartData = {
     labels: [],
@@ -421,6 +1111,10 @@
     ]
   };
 
+  if (window.ChartZoom) {
+    try { Chart.register(window.ChartZoom); } catch {}
+  }
+
   const historyChart = new Chart(document.getElementById("historyChart"), {
     type: "line",
     data: chartData,
@@ -428,10 +1122,29 @@
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      normalized: true,
+      spanGaps: true,
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: "#e6edf3" } },
-        tooltip: { enabled: true }
+        tooltip: { enabled: true },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: "x",
+            modifierKey: "shift",
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            drag: {
+              enabled: true,
+              backgroundColor: "rgba(37,99,235,0.14)",
+              borderColor: "rgba(37,99,235,0.70)",
+            },
+            mode: "x",
+          },
+        },
       },
       scales: {
         x: { ticks: { color: "#9aa4b2", maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,0.06)" } },
@@ -455,44 +1168,308 @@
     }
   });
 
+  const stageMarkerPlugin = {
+    id: "stageMarkerPlugin",
+    afterDatasetsDraw(chart, args, pluginOptions){
+      const markers = Array.isArray(pluginOptions?.markers) ? pluginOptions.markers : [];
+      if (!markers.length) return;
+
+      const xScale = chart.scales.x;
+      const yScale = chart.scales.y;
+      if (!xScale || !yScale) return;
+
+      const ctx = chart.ctx;
+      for (const marker of markers){
+        const value = Number(marker.x);
+        if (!Number.isFinite(value)) continue;
+        const xPixel = xScale.getPixelForValue(String(Math.round(value)));
+        if (!Number.isFinite(xPixel)) continue;
+
+        ctx.save();
+        ctx.strokeStyle = marker.color || "rgba(148,163,184,0.9)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(xPixel, yScale.top);
+        ctx.lineTo(xPixel, yScale.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (marker.label){
+          ctx.fillStyle = marker.color || "#e2e8f0";
+          ctx.font = "11px Arial";
+          ctx.fillText(String(marker.label), xPixel + 3, yScale.top + 12);
+        }
+        ctx.restore();
+      }
+    }
+  };
+  Chart.register(stageMarkerPlugin);
+
+  const compareAxisLabels = Array.from({ length: 101 }, (_, idx) => String(idx));
+  const compareTempChart = new Chart(document.getElementById("compareTempChart"), {
+    type: "line",
+    data: {
+      labels: compareAxisLabels.slice(),
+      datasets: [
+        { label: "Temp baseline (C)", data: [], borderColor: "#22c55e", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Temp target (C)", data: [], borderColor: "#f97316", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      normalized: true,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: "#e6edf3" } },
+        stageMarkerPlugin: { markers: [] },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Tempo normalizado (%)", color: "#9aa4b2" },
+          ticks: { color: "#9aa4b2", maxTicksLimit: 12 },
+          grid: { color: "rgba(255,255,255,0.06)" },
+        },
+        y: {
+          ticks: { color: "#9aa4b2" },
+          title: { display: true, text: "Temperatura (C)", color: "#9aa4b2" },
+          grid: { color: "rgba(255,255,255,0.06)" },
+        },
+      },
+    },
+  });
+
+  const compareCorrChart = new Chart(document.getElementById("compareCorrChart"), {
+    type: "line",
+    data: {
+      labels: compareAxisLabels.slice(),
+      datasets: [
+        { label: "Corrente baseline (A)", data: [], borderColor: "#38bdf8", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Corrente target (A)", data: [], borderColor: "#f43f5e", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      normalized: true,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: "#e6edf3" } },
+        stageMarkerPlugin: { markers: [] },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Tempo normalizado (%)", color: "#9aa4b2" },
+          ticks: { color: "#9aa4b2", maxTicksLimit: 12 },
+          grid: { color: "rgba(255,255,255,0.06)" },
+        },
+        y: {
+          ticks: { color: "#9aa4b2" },
+          title: { display: true, text: "Corrente (A)", color: "#9aa4b2" },
+          grid: { color: "rgba(255,255,255,0.06)" },
+        },
+      },
+    },
+  });
+
+  const tableBaseColumns = [
+    {
+      title: "",
+      field: "__row_actions",
+      headerSort: false,
+      hozAlign: "center",
+      width: 52,
+      formatter: () => '<button type="button" class="row-menu-trigger" aria-label="Acoes da linha">⋯</button>',
+      cellClick: (event, cell) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showRowActionMenu(event, cell.getRow().getData());
+      },
+    },
+    { title: "ID", field: "id", sorter: "number", width: 90 },
+    { title: "Data/Hora", field: "ts", sorter: "string", width: 170 },
+    { title: "Batch ID", field: "batch_id", sorter: "number", hozAlign: "right", width: 110 },
+    { title: "Composto", field: "composto", sorter: "string", width: 240 },
+    { title: "Lote", field: "lote", sorter: "string", width: 180 },
+    { title: "Observacoes", field: "observacoes", sorter: "string", widthGrow: 2, minWidth: 220 },
+    { title: "Temperatura (°C)", field: "temperatura", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
+    { title: "Corrente (A)", field: "corrente", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
+    { title: "Tampa (0/1)", field: "tampa", sorter: "number", hozAlign: "center", width: 120 },
+    { title: "Start (0/1)", field: "start", sorter: "number", hozAlign: "center", width: 120 },
+    { title: "Temp RAW", field: "temp_raw", sorter: "number", hozAlign: "right" },
+    { title: "Corr RAW", field: "corr_raw", sorter: "number", hozAlign: "right" },
+  ];
+
+  const baseColumnFields = new Set(tableBaseColumns.map((column) => String(column.field || "")));
+  const dynamicColumnDefs = new Map();
+  const hiddenColumnFields = new Set();
+  let tableColumnsSignature = tableBaseColumns.map((column) => String(column.field || "")).join("|");
+
   const table = new Tabulator("#table", {
     height: "100%",
-    layout: "fitDataStretch",
+    layout: "fitDataTable",
     movableColumns: true,
     reactiveData: false,
     clipboard: true,
     pagination: false,
-    columns: [
-      { title: "ID", field: "id", sorter: "number", width: 90 },
-      { title: "Data/Hora", field: "ts", sorter: "string", width: 170 },
-      { title: "Batch ID", field: "batch_id", sorter: "number", hozAlign: "right", width: 110 },
-      { title: "Composto", field: "composto", sorter: "string", width: 240 },
-      { title: "Lote", field: "lote", sorter: "string", width: 180 },
-      { title: "Observacoes", field: "observacoes", sorter: "string", widthGrow: 2, minWidth: 220 },
-      { title: "Temperatura (°C)", field: "temperatura", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
-      { title: "Corrente (A)", field: "corrente", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
-      { title: "Tampa (0/1)", field: "tampa", sorter: "number", hozAlign: "center", width: 120 },
-      { title: "Start (0/1)", field: "start", sorter: "number", hozAlign: "center", width: 120 },
-      { title: "Temp RAW", field: "temp_raw", sorter: "number", hozAlign: "right" },
-      { title: "Corr RAW", field: "corr_raw", sorter: "number", hozAlign: "right" },
-    ],
+    renderHorizontal: "virtual",
+    columns: tableBaseColumns,
   });
 
-  function rebuildChart(rowsDesc){
-    chartData.labels.length = 0;
-    chartData.datasets.forEach(ds => ds.data.length = 0);
+  function formatColumnTitle(field){
+    const clean = String(field || "").trim();
+    if (!clean) return "Coluna";
+    return clean
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
 
-    const rowsAsc = rowsDesc.slice().reverse();
-    for (const row of rowsAsc){
-      chartData.labels.push(row.ts || "");
-      chartData.datasets[0].data.push(asNum(row.corrente));
-      chartData.datasets[1].data.push(asNum(row.temperatura));
-      chartData.datasets[2].data.push(asNum(row.tampa));
-      chartData.datasets[3].data.push(asNum(row.start));
+  function buildDynamicColumnDef(field){
+    return {
+      title: formatColumnTitle(field),
+      field,
+      sorter: "string",
+      minWidth: 150,
+    };
+  }
+
+  function applyHiddenColumns(){
+    for (const field of hiddenColumnFields){
+      try {
+        table.hideColumn(field);
+      } catch {}
     }
+  }
+
+  function rebuildColumnManager(){
+    columnManagerList.innerHTML = "";
+    const columns = table.getColumns().filter((column) => {
+      const field = String(column.getField() || "");
+      return field.length > 0 && field !== "__row_actions";
+    });
+
+    for (const column of columns){
+      const field = String(column.getField() || "");
+      const definition = column.getDefinition() || {};
+      const label = document.createElement("label");
+      label.className = "column-toggle";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = column.isVisible();
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          hiddenColumnFields.delete(field);
+          table.showColumn(field);
+        } else {
+          hiddenColumnFields.add(field);
+          table.hideColumn(field);
+        }
+      });
+
+      const text = document.createElement("span");
+      text.textContent = definition.title || formatColumnTitle(field);
+      label.append(checkbox, text);
+      columnManagerList.appendChild(label);
+    }
+  }
+
+  function syncDynamicColumns(rows){
+    const discoveredFields = new Set();
+    for (const row of rows){
+      if (!row || typeof row !== "object") continue;
+      for (const key of Object.keys(row)){
+        const field = String(key || "").trim();
+        if (!field || field === "__row_actions") continue;
+        discoveredFields.add(field);
+      }
+    }
+
+    for (const field of discoveredFields){
+      if (baseColumnFields.has(field) || dynamicColumnDefs.has(field)) continue;
+      dynamicColumnDefs.set(field, buildDynamicColumnDef(field));
+    }
+
+    const allColumns = [...tableBaseColumns, ...dynamicColumnDefs.values()];
+    const signature = allColumns.map((column) => String(column.field || "")).join("|");
+    if (signature !== tableColumnsSignature){
+      table.setColumns(allColumns);
+      tableColumnsSignature = signature;
+      applyHiddenColumns();
+    }
+
+    rebuildColumnManager();
+  }
+
+  async function setTableRows(rows){
+    if (typeof table.replaceData === "function") {
+      await table.replaceData(rows);
+      return;
+    }
+    table.setData(rows);
+  }
+
+  function rebuildChart(rowsDesc){
+    const total = Array.isArray(rowsDesc) ? rowsDesc.length : 0;
+    if (!total){
+      chartData.labels = [];
+      chartData.datasets[0].data = [];
+      chartData.datasets[1].data = [];
+      chartData.datasets[2].data = [];
+      chartData.datasets[3].data = [];
+      historyChart.update("none");
+      return;
+    }
+
+    const step = Math.max(1, Math.ceil(total / HISTORY_CHART_MAX_POINTS));
+    const points = Math.ceil(total / step);
+    const labels = new Array(points);
+    const corrente = new Array(points);
+    const temperatura = new Array(points);
+    const tampa = new Array(points);
+    const start = new Array(points);
+
+    let idx = 0;
+    for (let rowIndex = total - 1; rowIndex >= 0; rowIndex -= step){
+      const row = rowsDesc[rowIndex] || {};
+      labels[idx] = row.ts || "";
+      corrente[idx] = asNum(row.corrente);
+      temperatura[idx] = asNum(row.temperatura);
+      tampa[idx] = asNum(row.tampa);
+      start[idx] = asNum(row.start);
+      idx += 1;
+    }
+
+    chartData.labels = labels;
+    chartData.datasets[0].data = corrente;
+    chartData.datasets[1].data = temperatura;
+    chartData.datasets[2].data = tampa;
+    chartData.datasets[3].data = start;
     historyChart.update("none");
   }
 
+  function zoomHistoryChart(factor){
+    if (typeof historyChart.zoom === "function") {
+      historyChart.zoom(factor);
+    }
+  }
+
+  function panHistoryChart(deltaX){
+    if (typeof historyChart.pan === "function") {
+      historyChart.pan({ x: deltaX }, undefined, "default");
+    }
+  }
+
+  function resetHistoryViewport(){
+    if (typeof historyChart.resetZoom === "function") {
+      historyChart.resetZoom();
+    }
+  }
   function setSelectOptions(selectEl, values, defaultLabel, columnName){
     const previousValue = selectEl.value;
     selectEl.innerHTML = "";
@@ -520,6 +1497,41 @@
     selectEl.value = hasPrevious ? previousValue : "";
   }
 
+  function normalizeBatchValues(values){
+    return (Array.isArray(values) ? values : [])
+      .map((value) => String(value).trim())
+      .filter((value) => value.length > 0)
+      .sort((left, right) => {
+        const leftNum = Number(left);
+        const rightNum = Number(right);
+        if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) return leftNum - rightNum;
+        return left.localeCompare(right, "pt-BR");
+      });
+  }
+
+  function setCompareSelectOptions(selectEl, values, defaultLabel){
+    const previousValue = selectEl.value;
+    selectEl.innerHTML = "";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = defaultLabel;
+    selectEl.appendChild(defaultOption);
+
+    for (const value of values){
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      selectEl.appendChild(option);
+    }
+
+    if (values.includes(previousValue)) {
+      selectEl.value = previousValue;
+    } else {
+      selectEl.value = "";
+    }
+  }
+
   function buildPeriodParams(){
     const params = new URLSearchParams();
     if (rangeStart.value) params.set("start", rangeStart.value);
@@ -536,20 +1548,36 @@
   }
 
   async function loadFilterOptions(){
+    const requestSeq = ++filterOptionsLoadSeq;
+    if (filterOptionsAbortController) filterOptionsAbortController.abort();
+    filterOptionsAbortController = new AbortController();
+
     const params = buildPeriodParams();
     const query = params.toString();
     const url = query ? `/api/history/options?${query}` : "/api/history/options";
 
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    try {
+      const res = await fetch(url, { cache: "no-store", signal: filterOptionsAbortController.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const payload = await res.json();
-    const columns = payload.columns || {};
-    const options = payload.options || {};
+      const payload = await res.json();
+      if (requestSeq !== filterOptionsLoadSeq) return;
 
-    setSelectOptions(selLote, Array.isArray(options.lote) ? options.lote : [], "Todos os lotes", columns.lote);
-    setSelectOptions(selComposto, Array.isArray(options.composto) ? options.composto : [], "Todos os compostos", columns.composto);
-    setSelectOptions(selBatch, Array.isArray(options.batch_id) ? options.batch_id : [], "Todos os batches", columns.batch_id);
+      const columns = payload.columns || {};
+      const options = payload.options || {};
+      const batchValues = normalizeBatchValues(options.batch_id);
+
+      setSelectOptions(selLote, Array.isArray(options.lote) ? options.lote : [], "Todos os lotes", columns.lote);
+      setSelectOptions(selComposto, Array.isArray(options.composto) ? options.composto : [], "Todos os compostos", columns.composto);
+      setSelectOptions(selBatch, batchValues, "Todos os batches", columns.batch_id);
+      setCompareSelectOptions(cmpBaselineBatch, batchValues, "Batch padrao");
+      setCompareSelectOptions(cmpTargetBatch, batchValues, "Batch alvo");
+      optionsPeriodSignature = getPeriodSignature();
+      updateAssignActionVisibility();
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      throw err;
+    }
   }
 
   function setModalSelectOptions(selectEl, values, defaultLabel){
@@ -606,7 +1634,7 @@
     }
   }
 
-  async function loadAssignModalOptions(){
+  async function loadAssignModalOptions(preferredBatchId = ""){
     assignModalStatus.textContent = "Carregando opcoes...";
     btnAssignSave.disabled = true;
 
@@ -620,15 +1648,7 @@
     const historyPayload = await historyRes.json();
     const historyOptions = historyPayload.options || {};
 
-    const batchValues = (Array.isArray(historyOptions.batch_id) ? historyOptions.batch_id : [])
-      .map((v) => String(v).trim())
-      .filter((v) => v.length > 0)
-      .sort((a, b) => {
-        const na = Number(a);
-        const nb = Number(b);
-        if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-        return a.localeCompare(b, "pt-BR");
-      });
+    const batchValues = normalizeBatchValues(historyOptions.batch_id);
     setModalSelectOptions(assignBatch, batchValues, "Selecione um batch");
 
     const catalogItems = [];
@@ -653,8 +1673,9 @@
       setModalCompostos(fallbackCompostos);
     }
 
-    if (selBatch.value && Array.from(assignBatch.options).some((opt) => opt.value === selBatch.value)) {
-      assignBatch.value = selBatch.value;
+    const selectedBatch = normalizeBatchId(preferredBatchId) || normalizeBatchId(selBatch.value);
+    if (selectedBatch && Array.from(assignBatch.options).some((opt) => opt.value === selectedBatch)) {
+      assignBatch.value = selectedBatch;
     }
 
     if (selComposto.value) {
@@ -671,14 +1692,16 @@
     assignModalStatus.textContent = "";
     btnAssignSave.disabled = assignBatch.disabled || assignComposto.disabled;
   }
+  async function openAssignModal(context = {}){
+    const preferredBatchId = normalizeBatchId(context.batchId);
+    const preferredLote = String(context.lote || "").trim();
 
-  async function openAssignModal(){
-    assignLote.value = selLote.value || "";
+    assignLote.value = preferredLote || selLote.value || "";
     assignObservacoes.value = "";
     assignModal.classList.add("open");
     assignModal.setAttribute("aria-hidden", "false");
     try {
-      await loadAssignModalOptions();
+      await loadAssignModalOptions(preferredBatchId);
     } catch (err) {
       assignModalStatus.textContent = `Erro ao carregar opcoes: ${err.message}`;
       btnAssignSave.disabled = true;
@@ -704,6 +1727,10 @@
   }
 
   async function loadHistory(){
+    const requestSeq = ++historyLoadSeq;
+    if (historyAbortController) historyAbortController.abort();
+    historyAbortController = new AbortController();
+
     loadStatus.textContent = "Carregando...";
     loadDot.classList.remove("ok");
 
@@ -712,49 +1739,239 @@
       const query = params.toString();
       const url = query ? `/api/history?${query}` : "/api/history";
 
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch(url, { cache: "no-store", signal: historyAbortController.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const payload = await res.json();
+      if (requestSeq !== historyLoadSeq) return;
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
 
-      table.setData(rows);
+      syncDynamicColumns(rows);
+      await setTableRows(rows);
       rebuildChart(rows);
 
       rowCount.textContent = String(rows.length);
-      lastTs.textContent = rows.length ? rows[0].ts : "--";
+      lastTs.textContent = rows.length ? formatTopbarTs(rows[0].ts) : "--";
 
       const ignored = ignoredMessages(payload);
       loadStatus.textContent = ignored.length ? `Historico carregado (${ignored.join(" | ")})` : "Historico carregado";
       loadDot.classList.add("ok");
     } catch (err) {
+      if (err && err.name === "AbortError") return;
       loadStatus.textContent = `Erro ao carregar: ${err.message}`;
       loadDot.classList.remove("ok");
     }
   }
 
-  document.getElementById("btnApplyFilters").onclick = async () => {
-    await loadHistory();
+  function pickBatchForReport(){
+    if (!selBatch.disabled && selBatch.value) return String(selBatch.value).trim();
+    const rows = table.getData();
+    if (rows.length === 1 && rows[0] && rows[0].batch_id !== null && rows[0].batch_id !== undefined && rows[0].batch_id !== ""){
+      return String(rows[0].batch_id).trim();
+    }
+    return "";
+  }
+
+  function extractFilename(contentDisposition, fallbackName){
+    if (!contentDisposition) return fallbackName;
+    const utf8Match = contentDisposition.match(/filename\\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) return decodeURIComponent(utf8Match[1]);
+    const plainMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+    if (plainMatch && plainMatch[1]) return plainMatch[1];
+    return fallbackName;
+  }
+
+  async function downloadBatchReport(format){
+    const batchId = pickBatchForReport();
+    if (!batchId){
+      loadStatus.textContent = "Selecione um batch no filtro para baixar o relatorio.";
+      loadDot.classList.remove("ok");
+      return;
+    }
+
+    const includeRaw = format === "xlsx" ? 1 : 0;
+    const url = `/api/batches/${encodeURIComponent(batchId)}/report?format=${encodeURIComponent(format)}&include_raw=${includeRaw}`;
+
+    loadStatus.textContent = `Gerando ${format.toUpperCase()} do batch ${batchId}...`;
+    loadDot.classList.remove("ok");
+
     try {
-      await loadFilterOptions();
-    } catch {}
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok){
+        let detail = `HTTP ${res.status}`;
+        try {
+          const payload = await res.json();
+          if (payload && payload.detail) detail = payload.detail;
+        } catch {}
+        throw new Error(detail);
+      }
+
+      const blob = await res.blob();
+      const fallbackName = `batch_${batchId}.${format}`;
+      const fileName = extractFilename(res.headers.get("content-disposition"), fallbackName);
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+
+      loadStatus.textContent = `Relatorio ${format.toUpperCase()} do batch ${batchId} baixado.`;
+      loadDot.classList.add("ok");
+    } catch (err) {
+      loadStatus.textContent = `Erro no download: ${err.message}`;
+      loadDot.classList.remove("ok");
+    }
+  }
+
+  function setCompareMetrics(metrics){
+    metricRmseTemp.textContent = fmt2(metrics?.rmse_temp);
+    metricRmseCorr.textContent = fmt2(metrics?.rmse_corrente);
+    metricDeltaDuration.textContent = fmtSigned(metrics?.duration_diff_s, 3);
+    metricDeltaAuc.textContent = fmtSigned(metrics?.current_auc_diff, 3);
+    metricDeltaPeakTemp.textContent = fmtSigned(metrics?.peak_temp_diff, 2);
+    metricDeltaPeakCorr.textContent = fmtSigned(metrics?.peak_corrente_diff, 2);
+  }
+
+  function markersToLines(markers, prefix, color){
+    const markerMap = [
+      ["ramp_end_pct", "Ramp"],
+      ["plateau_start_pct", "Plato"],
+      ["discharge_pct", "Descarga"],
+    ];
+    const lines = [];
+    for (const [key, label] of markerMap){
+      const value = Number(markers?.[key]);
+      if (!Number.isFinite(value)) continue;
+      lines.push({ x: value, label: `${prefix}-${label}`, color });
+    }
+    return lines;
+  }
+
+  function updateCompareCharts(payload){
+    const baselineProfile = payload?.baseline?.profile || {};
+    const targetProfile = payload?.target?.profile || {};
+
+    const axis = Array.isArray(baselineProfile.time_pct) && baselineProfile.time_pct.length
+      ? baselineProfile.time_pct
+      : compareAxisLabels.map((value) => Number(value));
+    const labels = axis.map((value) => String(Math.round(Number(value))));
+
+    compareTempChart.data.labels = labels;
+    compareTempChart.data.datasets[0].data = Array.isArray(baselineProfile.temp) ? baselineProfile.temp : [];
+    compareTempChart.data.datasets[1].data = Array.isArray(targetProfile.temp) ? targetProfile.temp : [];
+
+    compareCorrChart.data.labels = labels;
+    compareCorrChart.data.datasets[0].data = Array.isArray(baselineProfile.corrente) ? baselineProfile.corrente : [];
+    compareCorrChart.data.datasets[1].data = Array.isArray(targetProfile.corrente) ? targetProfile.corrente : [];
+
+    const markerLines = [
+      ...markersToLines(baselineProfile.markers, "B", "#22c55e"),
+      ...markersToLines(targetProfile.markers, "T", "#f59e0b"),
+    ];
+    compareTempChart.options.plugins.stageMarkerPlugin.markers = markerLines;
+    compareCorrChart.options.plugins.stageMarkerPlugin.markers = markerLines;
+
+    compareTempChart.update("none");
+    compareCorrChart.update("none");
+  }
+
+  async function runBatchCompare(){
+    const baselineBatch = String(cmpBaselineBatch.value || "").trim();
+    const targetBatch = String(cmpTargetBatch.value || "").trim();
+
+    if (!baselineBatch || !targetBatch){
+      compareStatus.textContent = "Selecione batch padrao e batch alvo.";
+      return;
+    }
+
+    compareStatus.textContent = "Comparando ciclos...";
+    try {
+      const params = new URLSearchParams({
+        baseline_batch_id: baselineBatch,
+        target_batch_id: targetBatch,
+      });
+      const res = await fetch(`/api/batches/compare?${params.toString()}`, { cache: "no-store" });
+      if (!res.ok){
+        let detail = `HTTP ${res.status}`;
+        try {
+          const payload = await res.json();
+          if (payload && payload.detail) detail = payload.detail;
+        } catch {}
+        throw new Error(detail);
+      }
+
+      const payload = await res.json();
+      updateCompareCharts(payload);
+      setCompareMetrics(payload.deviation_metrics || {});
+
+      const baselineSignature = payload?.baseline?.signature || "--";
+      const targetSignature = payload?.target?.signature || "--";
+      compareStatus.textContent = `Comparacao pronta. Assinaturas: baseline ${baselineSignature.slice(0, 10)}..., target ${targetSignature.slice(0, 10)}...`;
+    } catch (err) {
+      compareStatus.textContent = `Erro na comparacao: ${err.message}`;
+    }
+  }
+  document.getElementById("btnApplyFilters").onclick = async () => {
+    const shouldRefreshOptions = getPeriodSignature() !== optionsPeriodSignature;
+    const tasks = [loadHistory()];
+    if (shouldRefreshOptions) tasks.push(loadFilterOptions());
+    await Promise.allSettled(tasks);
   };
 
-  document.getElementById("btnAssignComposto").onclick = async () => {
-    await openAssignModal();
+  btnAssignComposto.onclick = async () => {
+    const selectedBatch = normalizeBatchId(selBatch.value);
+    if (!selectedBatch) return;
+    await openAssignModal({ batchId: selectedBatch });
+  };
+
+  btnRowAssignComposto.onclick = async () => {
+    const contextBatchId = normalizeBatchId(rowMenuBatchId);
+    const contextLote = rowMenuLote;
+    hideRowActionMenu();
+
+    if (!contextBatchId) return;
+    await openAssignModal({ batchId: contextBatchId, lote: contextLote });
+  };
+
+  document.getElementById("btnBatchPdf").onclick = async () => {
+    await downloadBatchReport("pdf");
+  };
+
+  document.getElementById("btnBatchXlsx").onclick = async () => {
+    await downloadBatchReport("xlsx");
   };
 
   document.getElementById("btnAssignClose").onclick = closeAssignModal;
   document.getElementById("btnAssignCancel").onclick = closeAssignModal;
+
   assignModal.onclick = (ev) => {
     if (ev.target === assignModal) closeAssignModal();
   };
 
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && assignModal.classList.contains("open")) {
-      closeAssignModal();
+    if (ev.key === "Escape") {
+      if (assignModal.classList.contains("open")) closeAssignModal();
+      hideRowActionMenu();
+      setColumnManagerOpen(false);
     }
   });
+
+  document.addEventListener("click", (ev) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    const clickedRowMenu = Boolean(target.closest("#rowActionMenu") || target.closest(".row-menu-trigger"));
+    const clickedColumnMenu = Boolean(target.closest("#columnManager") || target.closest("#btnManageCols"));
+    if (!clickedRowMenu) hideRowActionMenu();
+    if (!clickedColumnMenu) setColumnManagerOpen(false);
+  });
+
+  window.addEventListener("resize", hideRowActionMenu);
+  window.addEventListener("scroll", hideRowActionMenu, true);
+  window.addEventListener("resize", () => setColumnManagerOpen(false));
+  window.addEventListener("scroll", () => setColumnManagerOpen(false), true);
 
   btnAssignSave.onclick = async () => {
     if (!assignBatch.value) {
@@ -802,8 +2019,7 @@
       const updatedRows = Number(payload.updated_rows || 0);
       loadStatus.textContent = `Batch ${assignBatch.value} atualizado (${updatedRows} linhas).`;
       loadDot.classList.add("ok");
-      await loadFilterOptions();
-      await loadHistory();
+      await Promise.allSettled([loadFilterOptions(), loadHistory()]);
     } catch (err) {
       assignModalStatus.textContent = `Erro: ${err.message}`;
       loadStatus.textContent = `Erro ao vincular: ${err.message}`;
@@ -814,16 +2030,24 @@
   };
 
   document.getElementById("btnReload").onclick = async () => {
-    try {
-      await loadFilterOptions();
-    } catch {}
-    await loadHistory();
+    await Promise.allSettled([loadFilterOptions(), loadHistory()]);
   };
 
-  document.getElementById("btnResetZoom").onclick = () => rebuildChart(table.getData());
+  btnZoomIn.onclick = () => zoomHistoryChart(1.2);
+  btnZoomOut.onclick = () => zoomHistoryChart(0.85);
+  btnPanLeft.onclick = () => panHistoryChart(-120);
+  btnPanRight.onclick = () => panHistoryChart(120);
+  document.getElementById("btnResetZoom").onclick = () => {
+    resetHistoryViewport();
+    rebuildChart(table.getData());
+  };
 
   document.getElementById("btnExportXlsx").onclick = () => {
     table.download("xlsx", "fieldlogger_historico.xlsx", { sheetName: "Historico" });
+  };
+
+  document.getElementById("btnCompareBatches").onclick = async () => {
+    await runBatchCompare();
   };
 
   document.getElementById("btnClearFilters").onclick = async () => {
@@ -832,18 +2056,40 @@
     selBatch.value = "";
     rangeStart.value = "";
     rangeEnd.value = "";
-    try {
-      await loadFilterOptions();
-    } catch {}
-    await loadHistory();
+
+    updatePeriodSummary();
+    updateAssignActionVisibility();
+
+    await Promise.allSettled([loadFilterOptions(), loadHistory()]);
   };
 
+  btnManageCols.onclick = toggleColumnManager;
+  btnShowAllCols.onclick = () => {
+    hiddenColumnFields.clear();
+    const columns = table.getColumns();
+    for (const column of columns){
+      const field = String(column.getField() || "");
+      if (!field || field === "__row_actions") continue;
+      table.showColumn(field);
+    }
+    rebuildColumnManager();
+  };
+
+  selBatch.addEventListener("change", updateAssignActionVisibility);
+  rangeStart.addEventListener("change", updatePeriodSummary);
+  rangeEnd.addEventListener("change", updatePeriodSummary);
+  rangeStart.addEventListener("input", updatePeriodSummary);
+  rangeEnd.addEventListener("input", updatePeriodSummary);
+
+  updatePeriodSummary();
+  updateAssignActionVisibility();
+  rebuildColumnManager();
+
   (async () => {
-    try {
-      await loadFilterOptions();
-    } catch {}
-    await loadHistory();
+    await Promise.allSettled([loadFilterOptions(), loadHistory()]);
   })();
 </script>
 </body>
 </html>
+
+
