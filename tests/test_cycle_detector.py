@@ -20,7 +20,7 @@ class FakeConn:
 class FakeDb:
     def __init__(self):
         self.state = {}
-        self.next_batch_id = 1
+        self.sequence_value = 1
         self.created_batches = []
         self.closed_batches = []
 
@@ -33,9 +33,12 @@ class FakeDb:
     def set_state(self, conn, key, dict_value):
         self.state[key] = dict(dict_value)
 
-    def create_batch(self, conn, start_ts, op=None, operador=None, observacoes=None):
-        batch_id = self.next_batch_id
-        self.next_batch_id += 1
+    def next_batch_id_from_sequence(self, conn):
+        batch_id = self.sequence_value
+        self.sequence_value += 1
+        return batch_id
+
+    def create_batch(self, conn, batch_id, start_ts, op=None, operador=None, observacoes=None):
         self.created_batches.append(
             {
                 "batch_id": batch_id,

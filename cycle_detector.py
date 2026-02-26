@@ -192,6 +192,11 @@ class CycleLifecycleManager:
                 )
                 start_event = True
                 self._state_dirty = True
+                logger.bind(component="cycle_detector", event="batch_start_edge").info(
+                    "Borda de subida detectada: ciclo iniciado token={} ts={}",
+                    self.active_cycle.token,
+                    self.active_cycle.start_ts.isoformat(),
+                )
 
         batch_id_for_row = self.active_cycle.batch_id if self.active_cycle else None
         cycle_token_for_row = self.active_cycle.token if self.active_cycle else None
@@ -207,6 +212,11 @@ class CycleLifecycleManager:
             self.active_cycle.closed = True
             self.active_cycle.end_ts = read_ts
             self.pending_cycles.append(self.active_cycle)
+            logger.bind(component="cycle_detector", event="batch_end_edge").info(
+                "Borda de abertura da tampa detectada: ciclo encerrado token={} ts={}",
+                self.active_cycle.token,
+                read_ts.isoformat(),
+            )
             self.active_cycle = None
             end_event = True
             self._state_dirty = True
@@ -242,8 +252,21 @@ class CycleLifecycleManager:
                 for cycle in targets:
                     resolved_batch_id = cycle.batch_id
                     if resolved_batch_id is None:
-                        resolved_batch_id = int(self.db.create_batch(conn, start_ts=cycle.start_ts))
+                        resolved_batch_id = int(self.db.next_batch_id_from_sequence(conn))
+                        resolved_batch_id = int(
+                            self.db.create_batch(
+                                conn,
+                                batch_id=resolved_batch_id,
+                                start_ts=cycle.start_ts,
+                            )
+                        )
                         created_ids[cycle.token] = resolved_batch_id
+                        logger.bind(component="cycle_detector", event="batch_start_db").info(
+                            "Batch criado no Oracle batch_id={} token={} start_ts={}",
+                            resolved_batch_id,
+                            cycle.token,
+                            cycle.start_ts.isoformat(),
+                        )
 
                     if cycle.closed and not cycle.db_closed and cycle.end_ts is not None:
                         duration_s = max(0.0, (cycle.end_ts - cycle.start_ts).total_seconds())
@@ -260,6 +283,13 @@ class CycleLifecycleManager:
                             observacoes=cycle.observacoes_close,
                         )
                         closed_tokens.add(cycle.token)
+                        logger.bind(component="cycle_detector", event="batch_end_db").info(
+                            "Batch encerrado no Oracle batch_id={} token={} end_ts={} duration_s={}",
+                            int(resolved_batch_id),
+                            cycle.token,
+                            cycle.end_ts.isoformat(),
+                            round(duration_s, 3),
+                        )
                 conn.commit()
         except Exception as exc:
             self._sync_retry_not_before_monotonic = now + self._sync_retry_backoff_s
@@ -274,9 +304,16 @@ class CycleLifecycleManager:
             )
             if should_log:
                 self._last_sync_error_log_monotonic = now
-                logger.warning("Falha ao sincronizar ciclo com Oracle: {}", exc)
+                logger.bind(component="cycle_detector", event="oracle_sync_failure").error(
+                    "Falha ao sincronizar ciclo com Oracle: {}",
+                    exc,
+                )
+            if hasattr(readings_buffer, "mark_db_down"):
+                readings_buffer.mark_db_down("cycle_sync", exc)
             return False
 
+        if hasattr(readings_buffer, "mark_db_up"):
+            readings_buffer.mark_db_up("cycle_sync")
         self._sync_retry_not_before_monotonic = 0.0
         self._sync_retry_backoff_s = 1.0
         for cycle in targets:
@@ -337,7 +374,10 @@ class CycleLifecycleManager:
             )
             if should_log:
                 self._last_persist_error_log_monotonic = now
-                logger.warning("Falha ao persistir estado do detector: {}", exc)
+                logger.bind(component="cycle_detector", event="oracle_state_failure").error(
+                    "Falha ao persistir estado do detector: {}",
+                    exc,
+                )
             return False
 
         self._state_dirty = False
