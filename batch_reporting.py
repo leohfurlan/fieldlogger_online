@@ -55,7 +55,7 @@ def _safe_text(value: Any) -> str:
 
 
 def _build_summary_rows(batch_id: int, meta: dict, metrics: dict) -> list[tuple[str, str]]:
-    return [
+    rows = [
         ("Batch ID", str(batch_id)),
         ("Inicio", _fmt_dt(metrics.get("start_ts") or meta.get("start_ts"))),
         ("Fim", _fmt_dt(metrics.get("end_ts") or meta.get("end_ts"))),
@@ -75,6 +75,96 @@ def _build_summary_rows(batch_id: int, meta: dict, metrics: dict) -> list[tuple[
             f"{_fmt_num(metrics.get('energy_proxy'), 6)} (integral trapezoidal da corrente)",
         ),
     ]
+
+    estimated_kwh = metrics.get("energy_estimated_kwh")
+    if estimated_kwh is not None:
+        rows.append(
+            (
+                "Energia estimada (kWh)",
+                _fmt_num(estimated_kwh, 9),
+            )
+        )
+
+    return rows
+
+
+def build_batch_summary_excel(summary_rows: list[dict]) -> bytes:
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = "BatchesResumo"
+
+    headers = [
+        "batch_id",
+        "start_ts",
+        "end_ts",
+        "duracao_s",
+        "min_temp",
+        "max_temp",
+        "avg_temp",
+        "min_corrente",
+        "max_corrente",
+        "avg_corrente",
+        "current_auc",
+        "energy_proxy",
+        "energy_estimated_kwh",
+        "composto",
+        "lote",
+        "op",
+        "operador",
+    ]
+
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for row in summary_rows:
+        ws.append(
+            [
+                row.get("batch_id"),
+                row.get("start_ts"),
+                row.get("end_ts"),
+                row.get("duration_s"),
+                row.get("min_temp"),
+                row.get("max_temp"),
+                row.get("avg_temp"),
+                row.get("min_corrente"),
+                row.get("max_corrente"),
+                row.get("avg_corrente"),
+                row.get("current_auc"),
+                row.get("energy_proxy"),
+                row.get("energy_estimated_kwh"),
+                row.get("composto"),
+                row.get("lote"),
+                row.get("op"),
+                row.get("operador"),
+            ]
+        )
+
+    widths = {
+        "A": 11,
+        "B": 21,
+        "C": 21,
+        "D": 11,
+        "E": 10,
+        "F": 10,
+        "G": 10,
+        "H": 12,
+        "I": 12,
+        "J": 12,
+        "K": 14,
+        "L": 14,
+        "M": 18,
+        "N": 34,
+        "O": 22,
+        "P": 16,
+        "Q": 16,
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    out = io.BytesIO()
+    workbook.save(out)
+    return out.getvalue()
 
 
 def build_excel_report(
@@ -269,6 +359,10 @@ def build_pdf_report(
         ["AUC temperatura", _fmt_num(metrics.get("temp_auc"), 6)],
         ["Energy proxy", f"{_fmt_num(metrics.get('energy_proxy'), 6)} (integral da corrente)"] ,
     ]
+    if metrics.get("energy_estimated_kwh") is not None:
+        metrics_table_data.append(
+            ["Energia estimada (kWh)", _fmt_num(metrics.get("energy_estimated_kwh"), 9)]
+        )
 
     metrics_table = Table(metrics_table_data, colWidths=[6.4 * cm, 11.2 * cm])
     metrics_table.setStyle(
