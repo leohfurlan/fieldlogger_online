@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import os
 from pathlib import Path
+import threading
 import time
 from typing import Literal, Set
 
@@ -24,7 +25,11 @@ if __package__:
         compute_compare_metrics,
         derive_batch_events,
     )
-    from .batch_reporting import build_excel_report, build_pdf_report
+    from .batch_reporting import (
+        build_batch_summary_excel,
+        build_excel_report,
+        build_pdf_report,
+    )
     from .config import logger
     from .cycle_detector import CycleLifecycleManager
     from .db import (
@@ -34,6 +39,7 @@ if __package__:
         ensure_cycle_tracking_schema,
         fetch_batch_meta,
         fetch_batch_readings,
+        fetch_history_batch_index,
         fetch_history_filter_options,
         fetch_monitor_history,
         import_compostos_from_sankhya,
@@ -52,7 +58,7 @@ else:
         compute_compare_metrics,
         derive_batch_events,
     )
-    from batch_reporting import build_excel_report, build_pdf_report
+    from batch_reporting import build_batch_summary_excel, build_excel_report, build_pdf_report
     from config import logger
     from cycle_detector import CycleLifecycleManager
     from db import (
@@ -62,6 +68,7 @@ else:
         ensure_cycle_tracking_schema,
         fetch_batch_meta,
         fetch_batch_readings,
+        fetch_history_batch_index,
         fetch_history_filter_options,
         fetch_monitor_history,
         import_compostos_from_sankhya,
@@ -122,9 +129,14 @@ CYCLE_STALE_TIMEOUT_S = _env_float("CYCLE_STALE_TIMEOUT_S", 2 * 60 * 60)
 CYCLE_SIGNATURE_SAMPLE_EVERY = _env_int("CYCLE_SIGNATURE_SAMPLE_EVERY", 10)
 DB_SYNC_INTERVAL_S = _env_float("DB_SYNC_INTERVAL_S", 1.0)
 DB_TICK_INTERVAL_S = _env_float("DB_TICK_INTERVAL_S", 0.5)
+BATCH_METRICS_CACHE_TTL_S = max(1.0, _env_float("BATCH_METRICS_CACHE_TTL_S", 60.0))
+BATCH_SUMMARY_CACHE_TTL_S = max(1.0, _env_float("BATCH_SUMMARY_CACHE_TTL_S", 60.0))
 
 # -------- WS CLIENTS --------
 ws_clients: Set[WebSocket] = set()
+_batch_payload_cache_lock = threading.Lock()
+_batch_payload_cache: dict[int, tuple[float, tuple[dict, list[dict], list[dict], dict]]] = {}
+_batch_summary_cache: dict[str, tuple[float, dict]] = {}
 
 readings_buffer = ReadingsBuffer(
     max_batch_size=READINGS_BATCH_SIZE,
@@ -230,6 +242,12 @@ async def poller() -> None:
                         )
 
                     data["batch_id"] = resolved_batch_id
+                    if resolved_batch_id is not None:
+                        # Nova leitura invalida cache de metricas do batch em andamento.
+                        _invalidate_runtime_caches(batch_id=resolved_batch_id)
+                    elif start_event or end_event:
+                        _invalidate_runtime_caches()
+
                     if readings_buffer.failure_count > 0:
                         data["_db_failures"] = readings_buffer.failure_count
                 except Exception as exc:
@@ -385,7 +403,34 @@ def _serialize_events(events: list[dict]) -> list[dict]:
     return out
 
 
-def _load_batch_payload(batch_id: int) -> tuple[dict, list[dict], list[dict], dict]:
+def _serialize_meta(meta: dict) -> dict:
+    out = dict(meta or {})
+    for key in ("start_ts", "end_ts", "created_at"):
+        value = out.get(key)
+        if isinstance(value, datetime):
+            out[key] = value.isoformat()
+    return out
+
+
+def _iso_or_none(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return None
+
+
+def _invalidate_runtime_caches(batch_id: int | None = None) -> None:
+    with _batch_payload_cache_lock:
+        if batch_id is None:
+            _batch_payload_cache.clear()
+        else:
+            try:
+                _batch_payload_cache.pop(int(batch_id), None)
+            except Exception:
+                pass
+        _batch_summary_cache.clear()
+
+
+def _load_batch_payload_uncached(batch_id: int) -> tuple[dict, list[dict], list[dict], dict]:
     readings = fetch_batch_readings(batch_id)
     if not readings:
         raise HTTPException(
@@ -421,6 +466,145 @@ def _load_batch_payload(batch_id: int) -> tuple[dict, list[dict], list[dict], di
         meta["end_ts"] = metrics.get("end_ts")
 
     return meta, readings, events, metrics
+
+
+def _load_batch_payload(batch_id: int) -> tuple[dict, list[dict], list[dict], dict]:
+    lookup_id = int(batch_id)
+    now_monotonic = time.monotonic()
+
+    with _batch_payload_cache_lock:
+        cached = _batch_payload_cache.get(lookup_id)
+        if cached and (now_monotonic - cached[0]) <= BATCH_METRICS_CACHE_TTL_S:
+            return cached[1]
+
+    payload = _load_batch_payload_uncached(lookup_id)
+    with _batch_payload_cache_lock:
+        _batch_payload_cache[lookup_id] = (time.monotonic(), payload)
+    return payload
+
+
+def _summary_cache_key(
+    start_ts: datetime | None,
+    end_ts: datetime | None,
+    lote: str | None,
+    composto: str | None,
+    batch_id: str | None,
+    op: str | None,
+) -> str:
+    parts = [
+        start_ts.isoformat() if isinstance(start_ts, datetime) else "",
+        end_ts.isoformat() if isinstance(end_ts, datetime) else "",
+        (lote or "").strip().upper(),
+        (composto or "").strip().upper(),
+        (batch_id or "").strip().upper(),
+        (op or "").strip().upper(),
+    ]
+    return "|".join(parts)
+
+
+def _first_non_empty(values) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _build_batch_summary_payload(
+    start_ts: datetime | None,
+    end_ts: datetime | None,
+    lote: str | None,
+    composto: str | None,
+    batch_id: str | None,
+    op: str | None,
+) -> dict:
+    cache_key = _summary_cache_key(
+        start_ts=start_ts,
+        end_ts=end_ts,
+        lote=lote,
+        composto=composto,
+        batch_id=batch_id,
+        op=op,
+    )
+    now_monotonic = time.monotonic()
+    with _batch_payload_cache_lock:
+        cached = _batch_summary_cache.get(cache_key)
+        if cached and (now_monotonic - cached[0]) <= BATCH_SUMMARY_CACHE_TTL_S:
+            return cached[1]
+
+    index_payload = fetch_history_batch_index(
+        start_ts=start_ts,
+        end_ts=end_ts,
+        lote=lote,
+        composto=composto,
+        batch_id=batch_id,
+        op=op,
+    )
+
+    summary_rows = []
+    for index_row in index_payload.get("rows", []):
+        raw_batch_id = index_row.get("batch_id")
+        try:
+            numeric_batch_id = int(raw_batch_id)
+        except (TypeError, ValueError):
+            continue
+
+        try:
+            meta, readings, events, metrics = _load_batch_payload(batch_id=numeric_batch_id)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+
+        lote_value = _first_non_empty(
+            [index_row.get("lote")] + [row.get("lote") for row in readings]
+        )
+        composto_value = _first_non_empty(
+            [index_row.get("composto")] + [row.get("composto") for row in readings]
+        )
+        op_value = _first_non_empty(
+            [meta.get("op"), index_row.get("op")] + [row.get("op") for row in readings]
+        )
+
+        summary_rows.append(
+            {
+                "batch_id": numeric_batch_id,
+                "start_ts": _iso_or_none(metrics.get("start_ts") or meta.get("start_ts")),
+                "end_ts": _iso_or_none(metrics.get("end_ts") or meta.get("end_ts")),
+                "duration_s": metrics.get("duration_s"),
+                "samples": metrics.get("samples"),
+                "min_temp": metrics.get("min_temp"),
+                "max_temp": metrics.get("max_temp"),
+                "avg_temp": metrics.get("avg_temp"),
+                "min_corrente": metrics.get("min_corrente"),
+                "max_corrente": metrics.get("max_corrente"),
+                "avg_corrente": metrics.get("avg_corrente"),
+                "current_auc": metrics.get("current_auc"),
+                "energy_proxy": metrics.get("energy_proxy"),
+                "energy_mode": metrics.get("energy_mode"),
+                "energy_estimated_wh": metrics.get("energy_estimated_wh"),
+                "energy_estimated_kwh": metrics.get("energy_estimated_kwh"),
+                "composto": composto_value,
+                "lote": lote_value,
+                "op": op_value,
+                "operador": meta.get("operador"),
+                "events_count": len(events),
+            }
+        )
+
+    payload = {
+        "rows": summary_rows,
+        "filters": index_payload.get("filters", {}),
+        "meta": {
+            "total_batches": len(summary_rows),
+            "generated_at": datetime.utcnow().isoformat(),
+        },
+    }
+    with _batch_payload_cache_lock:
+        _batch_summary_cache[cache_key] = (time.monotonic(), payload)
+    return payload
 
 
 def _report_filename(batch_id: int, ext: str) -> str:
@@ -495,6 +679,65 @@ def history_options(
     return fetch_history_filter_options(start_ts=start_ts, end_ts=end_ts)
 
 
+@app.get("/api/batches/summary")
+def batches_summary(
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    lote: str | None = Query(default=None),
+    composto: str | None = Query(default=None),
+    batch_id: str | None = Query(default=None),
+    op: str | None = Query(default=None),
+):
+    start_ts = _parse_history_datetime(start, "start")
+    end_ts = _parse_history_datetime(end, "end")
+    if start_ts and end_ts and start_ts > end_ts:
+        raise HTTPException(
+            status_code=422,
+            detail="Parametro invalido: 'start' deve ser menor ou igual a 'end'.",
+        )
+
+    return _build_batch_summary_payload(
+        start_ts=start_ts,
+        end_ts=end_ts,
+        lote=lote,
+        composto=composto,
+        batch_id=batch_id,
+        op=op,
+    )
+
+
+@app.get("/api/batches/summary/export")
+def batches_summary_export(
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    lote: str | None = Query(default=None),
+    composto: str | None = Query(default=None),
+    batch_id: str | None = Query(default=None),
+    op: str | None = Query(default=None),
+):
+    start_ts = _parse_history_datetime(start, "start")
+    end_ts = _parse_history_datetime(end, "end")
+    if start_ts and end_ts and start_ts > end_ts:
+        raise HTTPException(
+            status_code=422,
+            detail="Parametro invalido: 'start' deve ser menor ou igual a 'end'.",
+        )
+
+    payload = _build_batch_summary_payload(
+        start_ts=start_ts,
+        end_ts=end_ts,
+        lote=lote,
+        composto=composto,
+        batch_id=batch_id,
+        op=op,
+    )
+    content = build_batch_summary_excel(payload.get("rows", []))
+    filename = f"batches_resumo_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return StreamingResponse(io.BytesIO(content), media_type=media_type, headers=headers)
+
+
 @app.get("/api/compostos")
 def compostos_list(active_only: bool = Query(default=True)):
     return {"items": list_compostos_catalog(active_only=active_only)}
@@ -525,7 +768,19 @@ def batch_assign_composto(
             status_code=400,
             detail=result.get("reason", "Falha ao vincular composto."),
         )
+    _invalidate_runtime_caches(batch_id=batch_id)
     return result
+
+
+@app.get("/api/batches/{batch_id}/metrics")
+def batch_metrics(batch_id: int):
+    meta, _, events, metrics = _load_batch_payload(batch_id=batch_id)
+    return {
+        "batch_id": int(batch_id),
+        "meta": _serialize_meta(meta),
+        "metrics": _serialize_metrics(metrics),
+        "events": _serialize_events(events),
+    }
 
 
 @app.get("/api/batches/{batch_id}/report")

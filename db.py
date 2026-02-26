@@ -1007,8 +1007,27 @@ def fetch_batch_readings(batch_id: int) -> list[dict]:
         with conn.cursor() as cur:
             optional_cols = _detect_optional_filter_columns(cur)
             batch_col = optional_cols["batch_id"]
+            composto_col = optional_cols["composto"]
+            lote_col = optional_cols["lote"]
+            op_col = optional_cols["op"]
             if not batch_col:
                 return []
+
+            composto_select = (
+                f"TO_CHAR({composto_col}) AS COMPOSTO"
+                if composto_col
+                else "CAST(NULL AS VARCHAR2(200)) AS COMPOSTO"
+            )
+            lote_select = (
+                f"TO_CHAR({lote_col}) AS LOTE"
+                if lote_col
+                else "CAST(NULL AS VARCHAR2(120)) AS LOTE"
+            )
+            op_select = (
+                f"TO_CHAR({op_col}) AS OP"
+                if op_col
+                else "CAST(NULL AS VARCHAR2(80)) AS OP"
+            )
 
             cur.execute(
                 f"""
@@ -1020,7 +1039,10 @@ def fetch_batch_readings(batch_id: int) -> list[dict]:
                   BOTAO_START,
                   TAMPA_DESCARGA,
                   TEMP_RAW,
-                  CORRENTE_RAW
+                  CORRENTE_RAW,
+                  {composto_select},
+                  {lote_select},
+                  {op_select}
                 FROM {MONITOR_TABLE_FQN}
                 WHERE TRIM(TO_CHAR({batch_col})) = :batch_id
                 ORDER BY TS ASC, ID ASC
@@ -1041,6 +1063,9 @@ def fetch_batch_readings(batch_id: int) -> list[dict]:
                 "lid_signal": _to_number(row[5]),
                 "temp_raw": _to_number(row[6]),
                 "corr_raw": _to_number(row[7]),
+                "composto": row[8],
+                "lote": row[9],
+                "op": row[10],
             }
         )
     return out
@@ -1158,6 +1183,149 @@ def fetch_history_filter_options(
                     ),
                 },
             }
+
+
+def fetch_history_batch_index(
+    start_ts: datetime | None = None,
+    end_ts: datetime | None = None,
+    lote: str | None = None,
+    composto: str | None = None,
+    batch_id: str | None = None,
+    op: str | None = None,
+) -> dict:
+    where_parts, binds = _build_period_where(start_ts=start_ts, end_ts=end_ts)
+
+    filters_meta = {
+        "period": {
+            "start": start_ts.strftime("%Y-%m-%d %H:%M:%S") if start_ts else None,
+            "end": end_ts.strftime("%Y-%m-%d %H:%M:%S") if end_ts else None,
+        },
+        "lote": {"requested": lote, "column": None, "applied": False, "ignored_reason": None},
+        "composto": {
+            "requested": composto,
+            "column": None,
+            "applied": False,
+            "ignored_reason": None,
+        },
+        "batch_id": {
+            "requested": batch_id,
+            "column": None,
+            "applied": False,
+            "ignored_reason": None,
+        },
+        "op": {"requested": op, "column": None, "applied": False, "ignored_reason": None},
+    }
+
+    rows = []
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            optional_cols = _detect_optional_filter_columns(cur)
+            lote_col = optional_cols["lote"]
+            composto_col = optional_cols["composto"]
+            batch_col = optional_cols["batch_id"]
+            op_col = optional_cols["op"]
+
+            filters_meta["batch_id"]["column"] = batch_col
+            if not batch_col:
+                if batch_id and batch_id.strip():
+                    filters_meta["batch_id"]["ignored_reason"] = (
+                        "Tabela sem coluna de batch (ex.: BATCH_ID)."
+                    )
+                return {"rows": rows, "filters": filters_meta}
+
+            where_parts.append(f"{batch_col} IS NOT NULL")
+
+            if lote and lote.strip():
+                filters_meta["lote"]["column"] = lote_col
+                if lote_col:
+                    where_parts.append(f"UPPER(TRIM(TO_CHAR({lote_col}))) = :lote")
+                    binds["lote"] = lote.strip().upper()
+                    filters_meta["lote"]["applied"] = True
+                else:
+                    filters_meta["lote"]["ignored_reason"] = (
+                        "Tabela sem coluna de lote (ex.: LOTE)."
+                    )
+
+            if composto and composto.strip():
+                filters_meta["composto"]["column"] = composto_col
+                if composto_col:
+                    where_parts.append(f"UPPER(TRIM(TO_CHAR({composto_col}))) = :composto")
+                    binds["composto"] = composto.strip().upper()
+                    filters_meta["composto"]["applied"] = True
+                else:
+                    filters_meta["composto"]["ignored_reason"] = (
+                        "Tabela sem coluna de composto (ex.: COMPOSTO/RECEITA)."
+                    )
+
+            if batch_id and batch_id.strip():
+                if batch_col:
+                    where_parts.append(f"UPPER(TRIM(TO_CHAR({batch_col}))) = :batch_id")
+                    binds["batch_id"] = batch_id.strip().upper()
+                    filters_meta["batch_id"]["applied"] = True
+                else:
+                    filters_meta["batch_id"]["ignored_reason"] = (
+                        "Tabela sem coluna de batch (ex.: BATCH_ID)."
+                    )
+
+            if op and op.strip():
+                filters_meta["op"]["column"] = op_col
+                if op_col:
+                    where_parts.append(f"UPPER(TRIM(TO_CHAR({op_col}))) = :op")
+                    binds["op"] = op.strip().upper()
+                    filters_meta["op"]["applied"] = True
+                else:
+                    filters_meta["op"]["ignored_reason"] = (
+                        "Tabela sem coluna de OP (ex.: OP/ORDEM_PRODUCAO)."
+                    )
+
+            lote_select = (
+                f"MAX(TO_CHAR({lote_col})) AS LOTE"
+                if lote_col
+                else "CAST(NULL AS VARCHAR2(120)) AS LOTE"
+            )
+            composto_select = (
+                f"MAX(TO_CHAR({composto_col})) AS COMPOSTO"
+                if composto_col
+                else "CAST(NULL AS VARCHAR2(200)) AS COMPOSTO"
+            )
+            op_select = (
+                f"MAX(TO_CHAR({op_col})) AS OP"
+                if op_col
+                else "CAST(NULL AS VARCHAR2(80)) AS OP"
+            )
+
+            sql = f"""
+            SELECT
+              TRIM(TO_CHAR({batch_col})) AS BATCH_ID,
+              MIN(TS) AS START_TS,
+              MAX(TS) AS END_TS,
+              {lote_select},
+              {composto_select},
+              {op_select}
+            FROM {MONITOR_TABLE_FQN}
+            """
+
+            if where_parts:
+                sql += "\nWHERE " + "\n  AND ".join(where_parts)
+            sql += f"\nGROUP BY TRIM(TO_CHAR({batch_col}))\nORDER BY MAX(TS) DESC"
+
+            cur.execute(sql, binds)
+            for row in cur.fetchall():
+                raw_batch = str(row[0] or "").strip()
+                if not raw_batch:
+                    continue
+                rows.append(
+                    {
+                        "batch_id": _to_int_if_numeric(raw_batch),
+                        "start_ts": row[1],
+                        "end_ts": row[2],
+                        "lote": str(row[3]).strip() if row[3] is not None else None,
+                        "composto": str(row[4]).strip() if row[4] is not None else None,
+                        "op": str(row[5]).strip() if row[5] is not None else None,
+                    }
+                )
+
+    return {"rows": rows, "filters": filters_meta}
 
 
 def fetch_monitor_history(
