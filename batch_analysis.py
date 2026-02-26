@@ -8,14 +8,10 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
-ENERGY_MODE_PROXY = "proxy"
-ENERGY_MODE_SINGLE_PHASE = "single_phase"
-ENERGY_MODE_THREE_PHASE = "three_phase"
-_VALID_ENERGY_MODES = {
-    ENERGY_MODE_PROXY,
-    ENERGY_MODE_SINGLE_PHASE,
-    ENERGY_MODE_THREE_PHASE,
-}
+DEFAULT_ENERGY_EST_ENABLED = True
+DEFAULT_ENERGY_VLL_VOLTS = 380.0
+DEFAULT_ENERGY_POWER_FACTOR = 0.90
+DEFAULT_ENERGY_LABEL = "Energia estimada (kWh) — PF assumido"
 
 
 def _to_float(value: Any) -> float | None:
@@ -28,6 +24,19 @@ def _to_float(value: Any) -> float | None:
     if math.isfinite(out):
         return out
     return None
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
 
 
 def _as_bit(value: Any) -> int:
@@ -51,62 +60,110 @@ def _avg(values: list[float]) -> float | None:
 
 @lru_cache(maxsize=1)
 def _resolve_energy_config() -> dict:
-    configured_mode = str(os.getenv("ENERGY_MODE", ENERGY_MODE_PROXY) or "").strip().lower()
-    if configured_mode not in _VALID_ENERGY_MODES:
-        configured_mode = ENERGY_MODE_PROXY
+    enabled = _to_bool(
+        os.getenv("ENERGY_EST_ENABLED"),
+        default=DEFAULT_ENERGY_EST_ENABLED,
+    )
 
-    voltage_v = _to_float(os.getenv("ENERGY_VOLTAGE_V"))
+    vll_volts = _to_float(os.getenv("ENERGY_VLL_VOLTS"))
+    if vll_volts is None:
+        # Compatibilidade com chave antiga.
+        vll_volts = _to_float(os.getenv("ENERGY_VOLTAGE_V"))
+    if vll_volts is None or vll_volts <= 0:
+        vll_volts = float(DEFAULT_ENERGY_VLL_VOLTS)
+
     power_factor = _to_float(os.getenv("ENERGY_POWER_FACTOR"))
+    if power_factor is None or power_factor <= 0 or power_factor > 1:
+        power_factor = float(DEFAULT_ENERGY_POWER_FACTOR)
 
-    mode = configured_mode
-    if mode != ENERGY_MODE_PROXY:
-        if (
-            voltage_v is None
-            or voltage_v <= 0
-            or power_factor is None
-            or power_factor <= 0
-            or power_factor > 1
-        ):
-            mode = ENERGY_MODE_PROXY
+    label = str(os.getenv("ENERGY_LABEL", DEFAULT_ENERGY_LABEL) or "").strip()
+    if not label:
+        label = DEFAULT_ENERGY_LABEL
 
     return {
-        "configured_mode": configured_mode,
-        "mode": mode,
-        "voltage_v": voltage_v,
+        "enabled": enabled,
+        "vll_volts": vll_volts,
         "power_factor": power_factor,
+        "label": label,
     }
 
 
-def _build_energy_metrics(current_auc: float | None) -> dict:
+def _compute_auc_points(points: list[tuple[datetime, float]]) -> float | None:
+    auc = 0.0
+    segments = 0
+
+    for (left_ts, left_v), (right_ts, right_v) in zip(points, points[1:]):
+        delta_s = (right_ts - left_ts).total_seconds()
+        if delta_s <= 0:
+            continue
+        auc += ((left_v + right_v) / 2.0) * delta_s
+        segments += 1
+
+    if segments <= 0:
+        return None
+    return auc
+
+
+def _build_energy_metrics(readings: list[dict], duration_s: float | None) -> dict:
     config = _resolve_energy_config()
-    mode = str(config.get("mode") or ENERGY_MODE_PROXY)
-    voltage_v = _to_float(config.get("voltage_v"))
+    enabled = bool(config.get("enabled"))
+    vll_volts = _to_float(config.get("vll_volts"))
     power_factor = _to_float(config.get("power_factor"))
+    energy_label = str(config.get("label") or DEFAULT_ENERGY_LABEL)
 
     out = {
-        "energy_mode": mode,
-        "energy_mode_configured": str(config.get("configured_mode") or mode),
-        "energy_voltage_v": _round_or_none(voltage_v, 3),
-        "energy_power_factor": _round_or_none(power_factor, 4),
+        "energy_est_enabled": enabled,
+        "energy_label": energy_label,
+        "vll_volts": _round_or_none(vll_volts, 3),
+        "power_factor_assumed": _round_or_none(power_factor, 4),
+        "energy_est_wh": None,
+        "energy_est_kwh": None,
+        "power_est_avg_kw": None,
+        "power_est_peak_kw": None,
+        # Chaves antigas mantidas por compatibilidade.
         "energy_estimated_wh": None,
         "energy_estimated_kwh": None,
     }
 
-    if (
-        current_auc is None
-        or mode == ENERGY_MODE_PROXY
-        or voltage_v is None
-        or power_factor is None
-    ):
+    if not enabled or vll_volts is None or power_factor is None:
         return out
 
-    scale = voltage_v * power_factor
-    if mode == ENERGY_MODE_THREE_PHASE:
-        scale *= math.sqrt(3.0)
+    power_points: list[tuple[datetime, float]] = []
+    for row in readings:
+        ts = row.get("ts")
+        if not isinstance(ts, datetime):
+            continue
+        corrente = _to_float(row.get("corrente"))
+        if corrente is None:
+            continue
+        power_est_w = math.sqrt(3.0) * vll_volts * corrente * power_factor
+        power_points.append((ts, power_est_w))
 
-    energy_wh = current_auc * scale / 3600.0
-    out["energy_estimated_wh"] = _round_or_none(energy_wh, 6)
-    out["energy_estimated_kwh"] = _round_or_none(energy_wh / 1000.0, 9)
+    if not power_points:
+        return out
+
+    power_values = [value for _, value in power_points]
+    power_auc_ws = _compute_auc_points(power_points)
+    avg_power_w = _avg(power_values)
+
+    if power_auc_ws is not None:
+        energy_wh = power_auc_ws / 3600.0
+        energy_kwh = energy_wh / 1000.0
+        out["energy_est_wh"] = _round_or_none(energy_wh, 6)
+        out["energy_est_kwh"] = _round_or_none(energy_kwh, 9)
+
+        if duration_s is not None and duration_s > 0:
+            avg_power_w = power_auc_ws / duration_s
+
+    peak_power_w = max(power_values)
+    out["power_est_avg_kw"] = _round_or_none(
+        None if avg_power_w is None else (avg_power_w / 1000.0),
+        6,
+    )
+    out["power_est_peak_kw"] = _round_or_none(peak_power_w / 1000.0, 6)
+
+    out["energy_estimated_wh"] = out["energy_est_wh"]
+    out["energy_estimated_kwh"] = out["energy_est_kwh"]
     return out
 
 
@@ -269,7 +326,7 @@ def compute_batch_metrics(
 
     current_auc = _compute_auc(ordered, "corrente")
     temp_auc = _compute_auc(ordered, "temp")
-    energy_metrics = _build_energy_metrics(current_auc)
+    energy_metrics = _build_energy_metrics(ordered, duration_s=duration_s)
 
     return {
         "start_ts": start_ts,
@@ -539,6 +596,16 @@ def _diff_or_none(left: Any, right: Any, places: int = 4) -> float | None:
     return round(right_value - left_value, places)
 
 
+def _diff_pct_or_none(left: Any, right: Any, places: int = 4) -> float | None:
+    left_value = _to_float(left)
+    right_value = _to_float(right)
+    if left_value is None or right_value is None:
+        return None
+    if abs(left_value) < 1e-12:
+        return None
+    return round(((right_value - left_value) / left_value) * 100.0, places)
+
+
 def compute_compare_metrics(
     baseline_profile: dict,
     target_profile: dict,
@@ -550,6 +617,20 @@ def compute_compare_metrics(
         target_metrics.get("energy_proxy"),
         places=6,
     )
+    baseline_energy_est_kwh = baseline_metrics.get("energy_est_kwh")
+    if baseline_energy_est_kwh is None:
+        baseline_energy_est_kwh = baseline_metrics.get("energy_estimated_kwh")
+
+    target_energy_est_kwh = target_metrics.get("energy_est_kwh")
+    if target_energy_est_kwh is None:
+        target_energy_est_kwh = target_metrics.get("energy_estimated_kwh")
+
+    energy_est_kwh_diff = _diff_or_none(
+        baseline_energy_est_kwh,
+        target_energy_est_kwh,
+        places=9,
+    )
+
     return {
         "rmse_temp": _round_or_none(
             compute_rmse(baseline_profile.get("temp") or [], target_profile.get("temp") or []),
@@ -570,11 +651,14 @@ def compute_compare_metrics(
             places=6,
         ),
         "energy_proxy_diff": energy_proxy_diff,
-        "energy_estimated_kwh_diff": _diff_or_none(
-            baseline_metrics.get("energy_estimated_kwh"),
-            target_metrics.get("energy_estimated_kwh"),
-            places=9,
+        "energy_est_kwh_diff": energy_est_kwh_diff,
+        "energy_est_kwh_diff_pct": _diff_pct_or_none(
+            baseline_energy_est_kwh,
+            target_energy_est_kwh,
+            places=4,
         ),
+        # Chave antiga mantida por compatibilidade.
+        "energy_estimated_kwh_diff": energy_est_kwh_diff,
         "peak_temp_diff": _diff_or_none(
             baseline_metrics.get("max_temp"),
             target_metrics.get("max_temp"),
