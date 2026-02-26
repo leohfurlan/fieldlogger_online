@@ -1,6 +1,14 @@
-﻿from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 
-from batch_analysis import build_signature_payload, resample_profile_101
+import pytest
+
+import batch_analysis
+from batch_analysis import (
+    build_signature_payload,
+    compute_batch_metrics,
+    derive_batch_events,
+    resample_profile_101,
+)
 
 
 def _sample_readings(temp_offset: float = 0.0):
@@ -53,3 +61,34 @@ def test_signature_same_series_equal_and_small_variation_changes_hash():
 
     assert sig_a == sig_b
     assert sig_a != sig_c
+
+
+def test_compute_batch_metrics_energy_proxy_mode(monkeypatch):
+    monkeypatch.delenv("ENERGY_MODE", raising=False)
+    monkeypatch.delenv("ENERGY_VOLTAGE_V", raising=False)
+    monkeypatch.delenv("ENERGY_POWER_FACTOR", raising=False)
+    batch_analysis._resolve_energy_config.cache_clear()
+
+    readings = _sample_readings()
+    events = derive_batch_events(readings)
+    metrics = compute_batch_metrics(readings, events=events, batch_meta={})
+
+    assert metrics["energy_mode"] == "proxy"
+    assert metrics["energy_proxy"] == metrics["current_auc"]
+    assert metrics["energy_estimated_kwh"] is None
+
+
+def test_compute_batch_metrics_single_phase_energy_estimation(monkeypatch):
+    monkeypatch.setenv("ENERGY_MODE", "single_phase")
+    monkeypatch.setenv("ENERGY_VOLTAGE_V", "220")
+    monkeypatch.setenv("ENERGY_POWER_FACTOR", "0.92")
+    batch_analysis._resolve_energy_config.cache_clear()
+
+    readings = _sample_readings()
+    events = derive_batch_events(readings)
+    metrics = compute_batch_metrics(readings, events=events, batch_meta={})
+
+    assert metrics["energy_mode"] == "single_phase"
+    assert metrics["current_auc"] == pytest.approx(2000.0, rel=1e-9)
+    assert metrics["energy_estimated_wh"] == pytest.approx(112.444444, rel=1e-6)
+    assert metrics["energy_estimated_kwh"] == pytest.approx(0.112444444, rel=1e-9)

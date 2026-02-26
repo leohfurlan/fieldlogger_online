@@ -2,9 +2,20 @@
 
 import hashlib
 import math
+import os
 from bisect import bisect_right
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
+
+ENERGY_MODE_PROXY = "proxy"
+ENERGY_MODE_SINGLE_PHASE = "single_phase"
+ENERGY_MODE_THREE_PHASE = "three_phase"
+_VALID_ENERGY_MODES = {
+    ENERGY_MODE_PROXY,
+    ENERGY_MODE_SINGLE_PHASE,
+    ENERGY_MODE_THREE_PHASE,
+}
 
 
 def _to_float(value: Any) -> float | None:
@@ -36,6 +47,67 @@ def _avg(values: list[float]) -> float | None:
     if not values:
         return None
     return sum(values) / float(len(values))
+
+
+@lru_cache(maxsize=1)
+def _resolve_energy_config() -> dict:
+    configured_mode = str(os.getenv("ENERGY_MODE", ENERGY_MODE_PROXY) or "").strip().lower()
+    if configured_mode not in _VALID_ENERGY_MODES:
+        configured_mode = ENERGY_MODE_PROXY
+
+    voltage_v = _to_float(os.getenv("ENERGY_VOLTAGE_V"))
+    power_factor = _to_float(os.getenv("ENERGY_POWER_FACTOR"))
+
+    mode = configured_mode
+    if mode != ENERGY_MODE_PROXY:
+        if (
+            voltage_v is None
+            or voltage_v <= 0
+            or power_factor is None
+            or power_factor <= 0
+            or power_factor > 1
+        ):
+            mode = ENERGY_MODE_PROXY
+
+    return {
+        "configured_mode": configured_mode,
+        "mode": mode,
+        "voltage_v": voltage_v,
+        "power_factor": power_factor,
+    }
+
+
+def _build_energy_metrics(current_auc: float | None) -> dict:
+    config = _resolve_energy_config()
+    mode = str(config.get("mode") or ENERGY_MODE_PROXY)
+    voltage_v = _to_float(config.get("voltage_v"))
+    power_factor = _to_float(config.get("power_factor"))
+
+    out = {
+        "energy_mode": mode,
+        "energy_mode_configured": str(config.get("configured_mode") or mode),
+        "energy_voltage_v": _round_or_none(voltage_v, 3),
+        "energy_power_factor": _round_or_none(power_factor, 4),
+        "energy_estimated_wh": None,
+        "energy_estimated_kwh": None,
+    }
+
+    if (
+        current_auc is None
+        or mode == ENERGY_MODE_PROXY
+        or voltage_v is None
+        or power_factor is None
+    ):
+        return out
+
+    scale = voltage_v * power_factor
+    if mode == ENERGY_MODE_THREE_PHASE:
+        scale *= math.sqrt(3.0)
+
+    energy_wh = current_auc * scale / 3600.0
+    out["energy_estimated_wh"] = _round_or_none(energy_wh, 6)
+    out["energy_estimated_kwh"] = _round_or_none(energy_wh / 1000.0, 9)
+    return out
 
 
 def _event_priority(event_type: str) -> int:
@@ -197,6 +269,7 @@ def compute_batch_metrics(
 
     current_auc = _compute_auc(ordered, "corrente")
     temp_auc = _compute_auc(ordered, "temp")
+    energy_metrics = _build_energy_metrics(current_auc)
 
     return {
         "start_ts": start_ts,
@@ -212,6 +285,7 @@ def compute_batch_metrics(
         "temp_auc": _round_or_none(temp_auc, 6),
         "energy_proxy": _round_or_none(current_auc, 6),
         "samples": len(ordered),
+        **energy_metrics,
     }
 
 
@@ -471,6 +545,11 @@ def compute_compare_metrics(
     baseline_metrics: dict,
     target_metrics: dict,
 ) -> dict:
+    energy_proxy_diff = _diff_or_none(
+        baseline_metrics.get("energy_proxy"),
+        target_metrics.get("energy_proxy"),
+        places=6,
+    )
     return {
         "rmse_temp": _round_or_none(
             compute_rmse(baseline_profile.get("temp") or [], target_profile.get("temp") or []),
@@ -489,6 +568,12 @@ def compute_compare_metrics(
             baseline_metrics.get("current_auc"),
             target_metrics.get("current_auc"),
             places=6,
+        ),
+        "energy_proxy_diff": energy_proxy_diff,
+        "energy_estimated_kwh_diff": _diff_or_none(
+            baseline_metrics.get("energy_estimated_kwh"),
+            target_metrics.get("energy_estimated_kwh"),
+            places=9,
         ),
         "peak_temp_diff": _diff_or_none(
             baseline_metrics.get("max_temp"),
