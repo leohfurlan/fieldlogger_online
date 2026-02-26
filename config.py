@@ -1,6 +1,8 @@
 """Central configuration for Oracle access and logging."""
 
 import os
+import sys
+
 import oracledb
 from dotenv import load_dotenv
 from loguru import logger
@@ -51,9 +53,26 @@ DB_DSN = os.getenv("DB_DSN")          # Ex.: //host:1521/ORCLPDB1  (EZCONNECT re
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
-# Structured JSON logs persisted to file
 LOG_FILE = os.getenv("APP_LOG_FILE", "app.log")
-logger.add(LOG_FILE, rotation="1 MB", serialize=True)
+LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
+LOG_ROTATION = os.getenv("APP_LOG_ROTATION", "10 MB")
+LOG_RETENTION = os.getenv("APP_LOG_RETENTION", "14 days")
+LOG_COMPRESSION = os.getenv("APP_LOG_COMPRESSION", "zip")
+
+# Replace default sink and keep one console stream + one structured JSON file sink.
+logger.remove()
+logger.add(sys.stderr, level=LOG_LEVEL, backtrace=False, diagnose=False)
+logger.add(
+    LOG_FILE,
+    level=LOG_LEVEL,
+    rotation=LOG_ROTATION,
+    retention=LOG_RETENTION,
+    compression=LOG_COMPRESSION,
+    serialize=True,
+    enqueue=True,
+    backtrace=False,
+    diagnose=False,
+)
 
 def get_conn():
     """

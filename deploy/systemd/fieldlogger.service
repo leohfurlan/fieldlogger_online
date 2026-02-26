@@ -1,0 +1,13 @@
+[Unit]
+Description=FieldLogger Online
+After=network.target
+
+[Service]
+User=fieldlogger
+WorkingDirectory=/opt/fieldlogger_online
+ExecStart=/opt/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

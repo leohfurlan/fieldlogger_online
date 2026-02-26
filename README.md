@@ -46,6 +46,10 @@ DB_DSN=SEU_DSN
 DB_USER=SEU_USUARIO
 DB_PASSWORD=SUA_SENHA
 APP_LOG_FILE=app.log
+APP_LOG_LEVEL=INFO
+APP_LOG_ROTATION=10 MB
+APP_LOG_RETENTION=14 days
+APP_LOG_COMPRESSION=zip
 ORACLE_CLIENT_LIB_DIR=C:\\oracle\\instantclient_23_9
 ORACLE_MODE=auto
 
@@ -56,7 +60,8 @@ MODBUS_TIMEOUT_S=5
 POLL_SECONDS=1
 
 READINGS_BATCH_SIZE=100
-READINGS_FLUSH_INTERVAL_S=2
+READINGS_FLUSH_INTERVAL_S=3
+READINGS_QUEUE_LIMIT=5000
 ```
 
 Variaveis opcionais adicionais:
@@ -70,6 +75,8 @@ DB_POOL_MAX=4
 DB_POOL_INCREMENT=1
 ```
 
+Use `.env.example` como baseline de producao.
+
 ## Migracao de banco (DDL)
 
 Aplicar na ordem:
@@ -77,6 +84,7 @@ Aplicar na ordem:
 ```sql
 @sql/001_create_batch_tables.sql
 @sql/002_create_state.sql
+@sql/003_create_batch_sequence.sql
 ```
 
 Esses scripts criam:
@@ -84,11 +92,12 @@ Esses scripts criam:
 - `ENGENHARIA.FIELDLOGGER_BATCHES`
 - FK de `FIELDLOGGER_MONITOR.BATCH_ID -> FIELDLOGGER_BATCHES.BATCH_ID`
 - `ENGENHARIA.APP_STATE`
+- `SEQ_BATCH_ID` (sequence oficial para IDs de batch)
 
 ## Execucao
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 Acesse:
@@ -101,6 +110,25 @@ Acesse:
 - `GET /api/batches/{batch_id}/report?format=pdf|xlsx&include_raw=0|1`
 - `GET /api/batches/{batch_id}/signature`
 - `GET /api/batches/compare?baseline_batch_id={id}&target_batch_id={id}`
+
+## Deploy Producao (systemd + Nginx)
+
+### systemd
+
+Arquivo de unit pronto em `deploy/systemd/fieldlogger.service` (destino final: `/etc/systemd/system/fieldlogger.service`).
+
+Comandos:
+
+```bash
+sudo cp deploy/systemd/fieldlogger.service /etc/systemd/system/fieldlogger.service
+sudo systemctl daemon-reload
+sudo systemctl enable fieldlogger
+sudo systemctl start fieldlogger
+```
+
+### Nginx interno
+
+Exemplo pronto em `deploy/nginx/fieldlogger.conf` com proxy HTTP + WebSocket para `127.0.0.1:8000`.
 
 ## Exemplos curl
 
