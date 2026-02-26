@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>FieldLogger Online</title>
 
-  <!-- Tabulator (tabela editável + colunas arrastáveis + filtros + download xlsx) -->
+  <!-- Tabulator (tabela somente leitura + colunas arrastáveis + filtros + download xlsx) -->
   <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
   <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
 
@@ -31,6 +31,28 @@
       font-family: Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
+    }
+    body.degraded{
+      padding-top: 48px;
+    }
+    .db-down-banner{
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      display: none;
+      background: #991b1b;
+      color: #fff;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      text-align: center;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.2px;
+      padding: 12px 16px;
+    }
+    .db-down-banner.show{
+      display: block;
     }
     header{
       padding:16px 20px;
@@ -87,6 +109,14 @@
     }
     .dot.ok{ background: var(--ok); }
     .dot.warn{ background: var(--warn); }
+    .status-indicator{
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .status-indicator.ok{ color: var(--ok); }
+    .status-indicator.fail{ color: var(--bad); }
 
     .container{
       padding:16px 20px 22px;
@@ -281,10 +311,13 @@
 </head>
 
 <body>
+<div id="dbDownBanner" class="db-down-banner">Banco de dados indisponível — operando em modo degradado</div>
 <header>
   <h1>FieldLogger Online</h1>
   <div class="status">
     <a class="nav-link" href="/historico">Ir para histórico</a>
+    <span class="pill"><span id="modbusIndicator" class="status-indicator fail">MODBUS: 🔴 FAIL</span></span>
+    <span class="pill"><span id="oracleIndicator" class="status-indicator fail">ORACLE: 🔴 FAIL</span></span>
     <span class="pill"><span id="wsDot" class="dot"></span><span id="wsStatus">Desconectado</span></span>
     <span class="pill">Última leitura: <b id="lastTs">--</b></span>
     <span class="pill">Pontos no gráfico: <b id="ptCount">0</b></span>
@@ -351,7 +384,7 @@
         </div>
       </div>
       <div class="hint">
-        Arraste o cabealho para reordenar colunas. Clique no título para ordenar. Dê duplo clique na célula para editar.
+        Arraste o cabealho para reordenar colunas. Clique no título para ordenar.
         Filtros por coluna ficam abaixo do título.
       </div>
       <div id="table"></div>
@@ -475,6 +508,9 @@
   // ---------- UI HOOKS ----------
   const wsDot = document.getElementById("wsDot");
   const wsStatus = document.getElementById("wsStatus");
+  const modbusIndicator = document.getElementById("modbusIndicator");
+  const oracleIndicator = document.getElementById("oracleIndicator");
+  const dbDownBanner = document.getElementById("dbDownBanner");
   const lastTs = document.getElementById("lastTs");
   const ptCount = document.getElementById("ptCount");
 
@@ -489,6 +525,22 @@
   const btnClearTable = document.getElementById("btnClearTable");
   const globalSearch = document.getElementById("globalSearch");
   const btnClearFilters = document.getElementById("btnClearFilters");
+
+  function setModbusStatus(isOk){
+    const ok = !!isOk;
+    modbusIndicator.textContent = `MODBUS: ${ok ? "🟢 OK" : "🔴 FAIL"}`;
+    modbusIndicator.classList.toggle("ok", ok);
+    modbusIndicator.classList.toggle("fail", !ok);
+  }
+
+  function setOracleStatus(isUp){
+    const up = !!isUp;
+    oracleIndicator.textContent = `ORACLE: ${up ? "🟢 OK" : "🔴 FAIL"}`;
+    oracleIndicator.classList.toggle("ok", up);
+    oracleIndicator.classList.toggle("fail", !up);
+    dbDownBanner.classList.toggle("show", !up);
+    document.body.classList.toggle("degraded", !up);
+  }
 
   // ---------- CHART ----------
   const ctx = document.getElementById("rtChart");
@@ -573,19 +625,23 @@
     reactiveData: false,
     clipboard: true,
     pagination: false,
+    editable: false,
+    columnDefaults: {
+      editable: false,
+    },
     columns: [
-      { title: "ID", field: "id", sorter: "number", headerFilter: "input", width: 90 },
-      { title: "Data/Hora", field: "ts", sorter: "string", headerFilter: "input", width: 170 },
-      { title: "Batch ID", field: "batch_id", sorter: "number", headerFilter: "input", hozAlign: "right", width: 110 },
+      { title: "ID", field: "id", sorter: "number", headerFilter: "input", width: 90, editable: false },
+      { title: "Data/Hora", field: "ts", sorter: "string", headerFilter: "input", width: 170, editable: false },
+      { title: "Batch ID", field: "batch_id", sorter: "number", headerFilter: "input", hozAlign: "right", width: 110, editable: false },
 
-      { title: "Temperatura (°C)", field: "temperatura", sorter: "number", headerFilter: "input", hozAlign: "right" },
-      { title: "Corrente (A)", field: "corrente", sorter: "number", headerFilter: "input", hozAlign: "right" },
+      { title: "Temperatura (°C)", field: "temperatura", sorter: "number", headerFilter: "input", hozAlign: "right", editable: false },
+      { title: "Corrente (A)", field: "corrente", sorter: "number", headerFilter: "input", hozAlign: "right", editable: false },
 
-      { title: "Tampa (0/1)", field: "tampa", sorter: "number", headerFilter: "input", hozAlign: "center", width: 120 },
-      { title: "Start (0/1)", field: "start", sorter: "number", headerFilter: "input", hozAlign: "center", width: 120 },
+      { title: "Tampa (0/1)", field: "tampa", sorter: "number", headerFilter: "input", hozAlign: "center", width: 120, editable: false },
+      { title: "Start (0/1)", field: "start", sorter: "number", headerFilter: "input", hozAlign: "center", width: 120, editable: false },
 
-      { title: "Temp RAW", field: "temp_raw", sorter: "number", headerFilter: "input", hozAlign: "right" },
-      { title: "Corr RAW", field: "corr_raw", sorter: "number", headerFilter: "input", hozAlign: "right" },
+      { title: "Temp RAW", field: "temp_raw", sorter: "number", headerFilter: "input", hozAlign: "right", editable: false },
+      { title: "Corr RAW", field: "corr_raw", sorter: "number", headerFilter: "input", hozAlign: "right", editable: false },
     ],
   });
 
@@ -628,6 +684,8 @@
 
   // inicia com live on (apÃ³s chart + table estarem inicializados)
   setLive(true);
+  setModbusStatus(false);
+  setOracleStatus(false);
 
   // ---------- WS ----------
   const wsProto = (location.protocol === "https:") ? "wss" : "ws";
@@ -641,11 +699,15 @@
   ws.onclose = () => {
     wsDot.classList.remove("ok");
     wsStatus.textContent = "Offline";
+    setModbusStatus(false);
+    setOracleStatus(false);
   };
 
   ws.onerror = () => {
     wsDot.classList.remove("ok");
     wsStatus.textContent = "Erro";
+    setModbusStatus(false);
+    setOracleStatus(false);
   };
 
   ws.onmessage = (ev) => {
@@ -656,10 +718,23 @@
       return;
     }
 
+    if (d._modbus_status === "OK") {
+      setModbusStatus(true);
+    } else if (d._modbus_status === "FAIL") {
+      setModbusStatus(false);
+    }
+
+    if (d._db_status === "UP") {
+      setOracleStatus(true);
+    } else if (d._db_status === "DOWN") {
+      setOracleStatus(false);
+    }
+
     if (d._status === "modbus_down") {
       wsDot.classList.remove("ok");
       wsDot.classList.add("warn");
       wsStatus.textContent = "Modbus offline";
+      setModbusStatus(false);
       return;
     }
 
