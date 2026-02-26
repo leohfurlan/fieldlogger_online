@@ -234,6 +234,43 @@ def build_excel_report(
     summary_ws.column_dimensions["A"].width = 28
     summary_ws.column_dimensions["B"].width = 66
 
+    metrics_flat_ws = workbook.create_sheet("MetricasTecnicas")
+    metrics_flat_headers = [
+        "batch_id",
+        "energy_est_kwh",
+        "pf_assumed",
+        "vll_volts",
+        "power_est_avg_kw",
+        "power_est_peak_kw",
+        "energy_proxy",
+    ]
+    metrics_flat_ws.append(metrics_flat_headers)
+    for cell in metrics_flat_ws[1]:
+        cell.font = Font(bold=True)
+
+    energy_est_kwh = metrics.get("energy_est_kwh")
+    if energy_est_kwh is None:
+        energy_est_kwh = metrics.get("energy_estimated_kwh")
+
+    metrics_flat_ws.append(
+        [
+            batch_id,
+            energy_est_kwh,
+            metrics.get("power_factor_assumed"),
+            metrics.get("vll_volts"),
+            metrics.get("power_est_avg_kw"),
+            metrics.get("power_est_peak_kw"),
+            metrics.get("energy_proxy"),
+        ]
+    )
+    metrics_flat_ws.column_dimensions["A"].width = 11
+    metrics_flat_ws.column_dimensions["B"].width = 18
+    metrics_flat_ws.column_dimensions["C"].width = 12
+    metrics_flat_ws.column_dimensions["D"].width = 10
+    metrics_flat_ws.column_dimensions["E"].width = 17
+    metrics_flat_ws.column_dimensions["F"].width = 17
+    metrics_flat_ws.column_dimensions["G"].width = 16
+
     events_ws = workbook.create_sheet("Eventos")
     events_ws.append(["timestamp", "tipo", "valor", "motivo"])
     for cell in events_ws[1]:
