@@ -852,6 +852,14 @@
           <span id="batchMetricEnergyKwh" class="metric-value">--</span>
         </div>
         <div class="metric-card">
+          <span class="metric-label">Potencia media estimada (kW)</span>
+          <span id="batchMetricPowerAvgKw" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Potencia pico estimada (kW)</span>
+          <span id="batchMetricPowerPeakKw" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
           <span class="metric-label">Pico corrente (A)</span>
           <span id="batchMetricPeakCorr" class="metric-value">--</span>
         </div>
@@ -864,6 +872,7 @@
           <span id="batchMetricSamples" class="metric-value">--</span>
         </div>
       </div>
+      <div id="batchEnergyAssumptions" class="inline-status">Estimado com V=-- e PF=-- (ajustavel no .env).</div>
     </article>
 
     <div class="analysis-grid">
@@ -954,16 +963,32 @@
           <span id="metricDeltaAuc" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Energia baseline (A*s)</span>
+          <span class="metric-label">Energia proxy baseline (A*s)</span>
           <span id="metricEnergyBaseline" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Energia target (A*s)</span>
+          <span class="metric-label">Energia proxy target (A*s)</span>
           <span id="metricEnergyTarget" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Delta Energia (A*s)</span>
+          <span class="metric-label">Delta Energia proxy (A*s)</span>
           <span id="metricEnergyDelta" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Energia estimada baseline (kWh)</span>
+          <span id="metricEnergyEstBaseline" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Energia estimada target (kWh)</span>
+          <span id="metricEnergyEstTarget" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Delta Energia estimada (kWh)</span>
+          <span id="metricEnergyEstDelta" class="metric-value">--</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Delta Energia estimada (%)</span>
+          <span id="metricEnergyEstDeltaPct" class="metric-value">--</span>
         </div>
         <div class="metric-card">
           <span class="metric-label">Delta Pico Temp</span>
@@ -1148,6 +1173,10 @@
   const metricEnergyBaseline = document.getElementById("metricEnergyBaseline");
   const metricEnergyTarget = document.getElementById("metricEnergyTarget");
   const metricEnergyDelta = document.getElementById("metricEnergyDelta");
+  const metricEnergyEstBaseline = document.getElementById("metricEnergyEstBaseline");
+  const metricEnergyEstTarget = document.getElementById("metricEnergyEstTarget");
+  const metricEnergyEstDelta = document.getElementById("metricEnergyEstDelta");
+  const metricEnergyEstDeltaPct = document.getElementById("metricEnergyEstDeltaPct");
   const metricDeltaPeakTemp = document.getElementById("metricDeltaPeakTemp");
   const metricDeltaPeakCorr = document.getElementById("metricDeltaPeakCorr");
 
@@ -1158,9 +1187,12 @@
   const batchMetricCurrentAuc = document.getElementById("batchMetricCurrentAuc");
   const batchMetricEnergyProxy = document.getElementById("batchMetricEnergyProxy");
   const batchMetricEnergyKwh = document.getElementById("batchMetricEnergyKwh");
+  const batchMetricPowerAvgKw = document.getElementById("batchMetricPowerAvgKw");
+  const batchMetricPowerPeakKw = document.getElementById("batchMetricPowerPeakKw");
   const batchMetricPeakCorr = document.getElementById("batchMetricPeakCorr");
   const batchMetricPeakTemp = document.getElementById("batchMetricPeakTemp");
   const batchMetricSamples = document.getElementById("batchMetricSamples");
+  const batchEnergyAssumptions = document.getElementById("batchEnergyAssumptions");
   const energyChartStatus = document.getElementById("energyChartStatus");
   const batchSummaryStatus = document.getElementById("batchSummaryStatus");
 
@@ -1342,10 +1374,19 @@
           borderWidth: 2,
         },
         {
-          label: "Energia acumulada (A*s)",
+          label: "Energia proxy acumulada (A*s)",
           data: [],
           borderColor: "#f59e0b",
-          yAxisID: "yEnergy",
+          yAxisID: "yProxy",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+        {
+          label: "Energia estimada acumulada (kWh)",
+          data: [],
+          borderColor: "#22c55e",
+          yAxisID: "yKwh",
           tension: 0.2,
           pointRadius: 0,
           borderWidth: 2,
@@ -1369,8 +1410,11 @@
             label(context){
               if (!context || !context.dataset) return "";
               const value = context.raw;
-              if (context.dataset.yAxisID === "yEnergy") {
-                return `Energia acumulada: ${fmtNum(value, 3)} A*s`;
+              if (context.dataset.yAxisID === "yProxy") {
+                return `Energia proxy acumulada: ${fmtNum(value, 3)} A*s`;
+              }
+              if (context.dataset.yAxisID === "yKwh") {
+                return `Energia estimada acumulada: ${fmtNum(value, 6)} kWh`;
               }
               return `Corrente: ${fmtNum(value, 2)} A`;
             },
@@ -1388,10 +1432,17 @@
           title: { display: true, text: "Corrente (A)", color: "#9aa4b2" },
           grid: { color: "rgba(255,255,255,0.06)" },
         },
-        yEnergy: {
+        yProxy: {
           position: "right",
           ticks: { color: "#9aa4b2" },
-          title: { display: true, text: "Energia acumulada (A*s)", color: "#9aa4b2" },
+          title: { display: true, text: "Energia proxy acumulada (A*s)", color: "#9aa4b2" },
+          grid: { drawOnChartArea: false, color: "rgba(255,255,255,0.06)" },
+        },
+        yKwh: {
+          position: "right",
+          offset: true,
+          ticks: { color: "#9aa4b2" },
+          title: { display: true, text: "Energia estimada acumulada (kWh)", color: "#9aa4b2" },
           grid: { drawOnChartArea: false, color: "rgba(255,255,255,0.06)" },
         },
       },
@@ -1562,7 +1613,19 @@
     { title: "Corr avg", field: "avg_corrente", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
     { title: "AUC Corrente (A*s)", field: "current_auc", sorter: "number", hozAlign: "right", formatter: (cell) => fmtNum(cell.getValue(), 3), width: 160 },
     { title: "Energia proxy (A*s)", field: "energy_proxy", sorter: "number", hozAlign: "right", formatter: (cell) => fmtNum(cell.getValue(), 3), width: 170 },
-    { title: "Energia estimada (kWh)", field: "energy_estimated_kwh", sorter: "number", hozAlign: "right", formatter: (cell) => fmtNum(cell.getValue(), 6), width: 190 },
+    {
+      title: "kWh_est",
+      field: "energy_est_kwh",
+      sorter: "number",
+      hozAlign: "right",
+      formatter: (cell) => {
+        const value = cell.getValue();
+        if (value !== null && value !== undefined) return fmtNum(value, 6);
+        const row = cell.getRow()?.getData?.() || {};
+        return fmtNum(row.energy_estimated_kwh, 6);
+      },
+      width: 130,
+    },
     { title: "Composto", field: "composto", sorter: "string", width: 260 },
     { title: "Lote", field: "lote", sorter: "string", width: 160 },
     { title: "OP", field: "op", sorter: "string", width: 120 },
@@ -1712,9 +1775,12 @@
     batchMetricCurrentAuc.textContent = "--";
     batchMetricEnergyProxy.textContent = "--";
     batchMetricEnergyKwh.textContent = "--";
+    batchMetricPowerAvgKw.textContent = "--";
+    batchMetricPowerPeakKw.textContent = "--";
     batchMetricPeakCorr.textContent = "--";
     batchMetricPeakTemp.textContent = "--";
     batchMetricSamples.textContent = "--";
+    batchEnergyAssumptions.textContent = "Estimado com V=-- e PF=-- (ajustavel no .env).";
   }
 
   function setBatchEnergySeries(points){
@@ -1722,17 +1788,20 @@
       batchEnergyChart.data.labels = [];
       batchEnergyChart.data.datasets[0].data = [];
       batchEnergyChart.data.datasets[1].data = [];
+      batchEnergyChart.data.datasets[2].data = [];
       batchEnergyChart.update("none");
       return;
     }
 
     const labels = points.map((point) => point.ts || "");
     const corr = points.map((point) => point.corrente);
-    const energy = points.map((point) => point.energy_proxy);
+    const energyProxy = points.map((point) => point.energy_proxy);
+    const energyEstimatedKwh = points.map((point) => point.energy_est_kwh);
 
     batchEnergyChart.data.labels = labels;
     batchEnergyChart.data.datasets[0].data = corr;
-    batchEnergyChart.data.datasets[1].data = energy;
+    batchEnergyChart.data.datasets[1].data = energyProxy;
+    batchEnergyChart.data.datasets[2].data = energyEstimatedKwh;
     batchEnergyChart.update("none");
   }
 
@@ -1748,14 +1817,26 @@
     return out;
   }
 
-  function buildEnergyProxyCurve(rowsDesc){
+  function buildEnergyCurves(rowsDesc, metrics){
     if (!Array.isArray(rowsDesc) || !rowsDesc.length) return [];
 
     const rowsAsc = rowsDesc.slice().reverse();
     const points = [];
-    let cumulative = 0.0;
+    let cumulativeProxy = 0.0;
+    let cumulativeEstimatedWh = 0.0;
     let prevTsMs = null;
     let prevCorr = null;
+
+    const energyEnabled = metrics?.energy_est_enabled !== false;
+    const vllVolts = asNum(metrics?.vll_volts);
+    const pfAssumed = asNum(metrics?.power_factor_assumed);
+    const canEstimateKwh = Boolean(
+      energyEnabled &&
+      vllVolts !== null &&
+      vllVolts > 0 &&
+      pfAssumed !== null &&
+      pfAssumed > 0
+    );
 
     for (const row of rowsAsc){
       const tsText = String(row?.ts || "");
@@ -1765,14 +1846,21 @@
       if (prevTsMs !== null && tsMs !== null && corr !== null && prevCorr !== null) {
         const deltaS = (tsMs - prevTsMs) / 1000.0;
         if (deltaS > 0) {
-          cumulative += ((prevCorr + corr) / 2.0) * deltaS;
+          cumulativeProxy += ((prevCorr + corr) / 2.0) * deltaS;
+
+          if (canEstimateKwh) {
+            const prevPowerW = Math.sqrt(3) * vllVolts * prevCorr * pfAssumed;
+            const powerW = Math.sqrt(3) * vllVolts * corr * pfAssumed;
+            cumulativeEstimatedWh += ((prevPowerW + powerW) / 2.0) * deltaS / 3600.0;
+          }
         }
       }
 
       points.push({
         ts: tsText,
         corrente: corr,
-        energy_proxy: cumulative,
+        energy_proxy: cumulativeProxy,
+        energy_est_kwh: canEstimateKwh ? (cumulativeEstimatedWh / 1000.0) : null,
       });
 
       prevTsMs = tsMs;
@@ -1785,7 +1873,8 @@
   function updateSelectedBatchCards(batchId, payload){
     const metrics = payload?.metrics || {};
     const meta = payload?.meta || {};
-    const hasEstimatedEnergy = metrics?.energy_estimated_kwh !== null && metrics?.energy_estimated_kwh !== undefined;
+    const energyEstKwh = metrics?.energy_est_kwh ?? metrics?.energy_estimated_kwh;
+    const hasEstimatedEnergy = energyEstKwh !== null && energyEstKwh !== undefined;
 
     selectedBatchStatus.textContent = `Batch ${batchId} carregado.`;
     selectedBatchMeta.textContent = `OP ${meta?.op || "--"} | Operador ${meta?.operador || "--"}`;
@@ -1793,10 +1882,22 @@
     batchMetricDuration.textContent = formatDurationSeconds(metrics?.duration_s);
     batchMetricCurrentAuc.textContent = fmtNum(metrics?.current_auc, 3);
     batchMetricEnergyProxy.textContent = fmtNum(metrics?.energy_proxy, 3);
-    batchMetricEnergyKwh.textContent = hasEstimatedEnergy ? fmtNum(metrics?.energy_estimated_kwh, 6) : "--";
+    batchMetricEnergyKwh.textContent = hasEstimatedEnergy ? fmtNum(energyEstKwh, 6) : "--";
+    batchMetricPowerAvgKw.textContent = fmtNum(metrics?.power_est_avg_kw, 3);
+    batchMetricPowerPeakKw.textContent = fmtNum(metrics?.power_est_peak_kw, 3);
     batchMetricPeakCorr.textContent = fmtNum(metrics?.max_corrente, 2);
     batchMetricPeakTemp.textContent = fmtNum(metrics?.max_temp, 2);
     batchMetricSamples.textContent = fmtInt(metrics?.samples);
+
+    const assumedPf = asNum(metrics?.power_factor_assumed);
+    const assumedVll = asNum(metrics?.vll_volts);
+    if (metrics?.energy_est_enabled === false) {
+      batchEnergyAssumptions.textContent = "Energia estimada desabilitada no .env (ENERGY_EST_ENABLED=false).";
+    } else if (assumedPf !== null && assumedVll !== null) {
+      batchEnergyAssumptions.textContent = `Estimado com V=${fmtNum(assumedVll, 0)}V e PF=${fmtNum(assumedPf, 2)} (ajustavel no .env).`;
+    } else {
+      batchEnergyAssumptions.textContent = "Parametros de energia estimada indisponiveis para este batch.";
+    }
   }
 
   function rebuildChart(rowsDesc){
@@ -1984,10 +2085,10 @@
 
       updateSelectedBatchCards(normalizedBatchId, metricsPayload);
       const rows = Array.isArray(historyPayload?.rows) ? historyPayload.rows : [];
-      const curve = buildEnergyProxyCurve(rows);
+      const curve = buildEnergyCurves(rows, metricsPayload?.metrics || {});
       setBatchEnergySeries(curve);
       energyChartStatus.textContent = curve.length
-        ? `Energia acumulada calculada por integracao trapezoidal (${curve.length} pontos).`
+        ? `Curvas acumuladas (proxy A*s e energia estimada kWh) por integracao trapezoidal (${curve.length} pontos).`
         : "Sem pontos suficientes para gerar curva de energia.";
     } catch (err) {
       if (err && err.name === "AbortError") return;
@@ -2352,6 +2453,9 @@
     const metrics = payload?.deviation_metrics || {};
     const baselineMetrics = payload?.baseline?.metrics || {};
     const targetMetrics = payload?.target?.metrics || {};
+    const baselineEnergyEst = baselineMetrics?.energy_est_kwh ?? baselineMetrics?.energy_estimated_kwh;
+    const targetEnergyEst = targetMetrics?.energy_est_kwh ?? targetMetrics?.energy_estimated_kwh;
+    const energyEstDiff = metrics?.energy_est_kwh_diff ?? metrics?.energy_estimated_kwh_diff;
 
     metricRmseTemp.textContent = fmt2(metrics?.rmse_temp);
     metricRmseCorr.textContent = fmt2(metrics?.rmse_corrente);
@@ -2365,6 +2469,10 @@
         : metrics?.current_auc_diff,
       3
     );
+    metricEnergyEstBaseline.textContent = fmtNum(baselineEnergyEst, 6);
+    metricEnergyEstTarget.textContent = fmtNum(targetEnergyEst, 6);
+    metricEnergyEstDelta.textContent = fmtSigned(energyEstDiff, 6);
+    metricEnergyEstDeltaPct.textContent = fmtSigned(metrics?.energy_est_kwh_diff_pct, 3);
     metricDeltaPeakTemp.textContent = fmtSigned(metrics?.peak_temp_diff, 2);
     metricDeltaPeakCorr.textContent = fmtSigned(metrics?.peak_corrente_diff, 2);
   }
