@@ -55,6 +55,14 @@ def _safe_text(value: Any) -> str:
 
 
 def _build_summary_rows(batch_id: int, meta: dict, metrics: dict) -> list[tuple[str, str]]:
+    energy_est_kwh = metrics.get("energy_est_kwh")
+    if energy_est_kwh is None:
+        energy_est_kwh = metrics.get("energy_estimated_kwh")
+
+    energy_label = _safe_text(metrics.get("energy_label"))
+    if energy_label == "--":
+        energy_label = "Energia estimada (kWh) — PF assumido"
+
     rows = [
         ("Batch ID", str(batch_id)),
         ("Inicio", _fmt_dt(metrics.get("start_ts") or meta.get("start_ts"))),
@@ -76,14 +84,35 @@ def _build_summary_rows(batch_id: int, meta: dict, metrics: dict) -> list[tuple[
         ),
     ]
 
-    estimated_kwh = metrics.get("energy_estimated_kwh")
-    if estimated_kwh is not None:
+    if energy_est_kwh is not None:
         rows.append(
             (
-                "Energia estimada (kWh)",
-                _fmt_num(estimated_kwh, 9),
+                energy_label,
+                _fmt_num(energy_est_kwh, 9),
             )
         )
+
+    if metrics.get("power_est_avg_kw") is not None:
+        rows.append(
+            ("Potencia media estimada (kW)", _fmt_num(metrics.get("power_est_avg_kw"), 6))
+        )
+
+    if metrics.get("power_est_peak_kw") is not None:
+        rows.append(
+            ("Potencia pico estimada (kW)", _fmt_num(metrics.get("power_est_peak_kw"), 6))
+        )
+
+    assumed_vll = metrics.get("vll_volts")
+    assumed_pf = metrics.get("power_factor_assumed")
+    if assumed_vll is not None and assumed_pf is not None:
+        rows.append(
+            (
+                "Parametros da estimativa de energia",
+                f"Vll={_fmt_num(assumed_vll, 0)} V | PF={_fmt_num(assumed_pf, 2)} (assumidos)",
+            )
+        )
+    elif metrics.get("energy_est_enabled") is False:
+        rows.append(("Parametros da estimativa de energia", "Estimativa desabilitada no .env."))
 
     return rows
 
@@ -106,7 +135,11 @@ def build_batch_summary_excel(summary_rows: list[dict]) -> bytes:
         "avg_corrente",
         "current_auc",
         "energy_proxy",
-        "energy_estimated_kwh",
+        "energy_est_kwh",
+        "power_est_avg_kw",
+        "power_est_peak_kw",
+        "pf_assumed",
+        "vll_volts",
         "composto",
         "lote",
         "op",
@@ -118,6 +151,10 @@ def build_batch_summary_excel(summary_rows: list[dict]) -> bytes:
         cell.font = Font(bold=True)
 
     for row in summary_rows:
+        energy_est_kwh = row.get("energy_est_kwh")
+        if energy_est_kwh is None:
+            energy_est_kwh = row.get("energy_estimated_kwh")
+
         ws.append(
             [
                 row.get("batch_id"),
@@ -132,7 +169,11 @@ def build_batch_summary_excel(summary_rows: list[dict]) -> bytes:
                 row.get("avg_corrente"),
                 row.get("current_auc"),
                 row.get("energy_proxy"),
-                row.get("energy_estimated_kwh"),
+                energy_est_kwh,
+                row.get("power_est_avg_kw"),
+                row.get("power_est_peak_kw"),
+                row.get("power_factor_assumed") if row.get("power_factor_assumed") is not None else row.get("pf_assumed"),
+                row.get("vll_volts"),
                 row.get("composto"),
                 row.get("lote"),
                 row.get("op"),
@@ -153,11 +194,15 @@ def build_batch_summary_excel(summary_rows: list[dict]) -> bytes:
         "J": 12,
         "K": 14,
         "L": 14,
-        "M": 18,
-        "N": 34,
-        "O": 22,
-        "P": 16,
-        "Q": 16,
+        "M": 14,
+        "N": 14,
+        "O": 14,
+        "P": 12,
+        "Q": 11,
+        "R": 34,
+        "S": 22,
+        "T": 16,
+        "U": 16,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
@@ -359,10 +404,37 @@ def build_pdf_report(
         ["AUC temperatura", _fmt_num(metrics.get("temp_auc"), 6)],
         ["Energy proxy", f"{_fmt_num(metrics.get('energy_proxy'), 6)} (integral da corrente)"] ,
     ]
-    if metrics.get("energy_estimated_kwh") is not None:
+
+    energy_est_kwh = metrics.get("energy_est_kwh")
+    if energy_est_kwh is None:
+        energy_est_kwh = metrics.get("energy_estimated_kwh")
+
+    energy_label = _safe_text(metrics.get("energy_label"))
+    if energy_label == "--":
+        energy_label = "Energia estimada (kWh) — PF assumido"
+
+    if energy_est_kwh is not None:
         metrics_table_data.append(
-            ["Energia estimada (kWh)", _fmt_num(metrics.get("energy_estimated_kwh"), 9)]
+            [energy_label, _fmt_num(energy_est_kwh, 9)]
         )
+    if metrics.get("power_est_avg_kw") is not None:
+        metrics_table_data.append(
+            ["Potencia media estimada (kW)", _fmt_num(metrics.get("power_est_avg_kw"), 6)]
+        )
+    if metrics.get("power_est_peak_kw") is not None:
+        metrics_table_data.append(
+            ["Potencia pico estimada (kW)", _fmt_num(metrics.get("power_est_peak_kw"), 6)]
+        )
+
+    if metrics.get("vll_volts") is not None and metrics.get("power_factor_assumed") is not None:
+        metrics_table_data.append(
+            [
+                "Parametros da estimativa",
+                f"Vll={_fmt_num(metrics.get('vll_volts'), 0)} V | PF={_fmt_num(metrics.get('power_factor_assumed'), 2)} (assumidos)",
+            ]
+        )
+    elif metrics.get("energy_est_enabled") is False:
+        metrics_table_data.append(["Parametros da estimativa", "Estimativa desabilitada no .env."])
 
     metrics_table = Table(metrics_table_data, colWidths=[6.4 * cm, 11.2 * cm])
     metrics_table.setStyle(
@@ -419,12 +491,21 @@ def build_pdf_report(
     story.append(events_table)
     story.append(Spacer(1, 0.2 * cm))
 
-    story.append(
-        Paragraph(
-            "Observacao: energy_proxy corresponde a integral trapezoidal da corrente ao longo do tempo.",
-            normal,
+    assumed_vll = metrics.get("vll_volts")
+    assumed_pf = metrics.get("power_factor_assumed")
+    if assumed_vll is not None and assumed_pf is not None:
+        note = (
+            "Observacao: energy_proxy corresponde a integral trapezoidal da corrente ao longo do tempo. "
+            f"Energia/potencia estimadas usam Vll={_fmt_num(assumed_vll, 0)} V e PF={_fmt_num(assumed_pf, 2)} "
+            "(assumidos; nao representam medicao real de energia)."
         )
-    )
+    else:
+        note = (
+            "Observacao: energy_proxy corresponde a integral trapezoidal da corrente ao longo do tempo. "
+            "Quando habilitada, a energia em kWh e estimada por modelo eletrico com PF assumido."
+        )
+
+    story.append(Paragraph(note, normal))
 
     doc.build(story)
     return out.getvalue()
