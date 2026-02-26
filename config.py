@@ -53,6 +53,44 @@ DB_DSN = os.getenv("DB_DSN")          # Ex.: //host:1521/ORCLPDB1  (EZCONNECT re
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = str(raw).strip()
+    return text if text else default
+
+
+ENERGY_EST_ENABLED = _env_bool("ENERGY_EST_ENABLED", True)
+ENERGY_VLL_VOLTS = _env_float("ENERGY_VLL_VOLTS", 380.0)
+ENERGY_POWER_FACTOR = _env_float("ENERGY_POWER_FACTOR", 0.90)
+ENERGY_LABEL = _env_str(
+    "ENERGY_LABEL",
+    "Energia estimada (kWh) — PF assumido",
+)
+
 LOG_FILE = os.getenv("APP_LOG_FILE", "app.log")
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
 LOG_ROTATION = os.getenv("APP_LOG_ROTATION", "10 MB")
@@ -86,6 +124,10 @@ __all__ = [
     "DB_USER",
     "DB_PASSWORD",
     "ORACLE_DRIVER_MODE",
+    "ENERGY_EST_ENABLED",
+    "ENERGY_VLL_VOLTS",
+    "ENERGY_POWER_FACTOR",
+    "ENERGY_LABEL",
     "get_conn",
     "logger",
 ]
