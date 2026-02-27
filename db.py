@@ -204,6 +204,48 @@ def _sequence_exists(cur, owner: str, sequence_name: str) -> bool:
     return int(cur.fetchone()[0]) > 0
 
 
+def _to_int_default(value, default: int = 0) -> int:
+    try:
+        if value is None:
+            return int(default)
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _max_known_batch_id(cur) -> int:
+    max_batch_id = 0
+
+    try:
+        cur.execute(f"SELECT NVL(MAX(BATCH_ID), 0) FROM {BATCHES_TABLE_FQN}")
+        row = cur.fetchone()
+        max_batch_id = max(max_batch_id, _to_int_default(row[0] if row else 0, 0))
+    except oracledb.DatabaseError as e:
+        err, = e.args
+        # ORA-00942: tabela ou view inexistente.
+        if err.code != 942:
+            raise
+
+    try:
+        batch_col = _detect_optional_filter_columns(cur).get("batch_id")
+        if batch_col:
+            cur.execute(
+                f"""
+                SELECT NVL(MAX({batch_col}), 0)
+                FROM {MONITOR_TABLE_FQN}
+                WHERE {batch_col} IS NOT NULL
+                """
+            )
+            row = cur.fetchone()
+            max_batch_id = max(max_batch_id, _to_int_default(row[0] if row else 0, 0))
+    except oracledb.DatabaseError as e:
+        err, = e.args
+        if err.code not in (904, 942):
+            raise
+
+    return int(max_batch_id)
+
+
 def ensure_compostos_schema() -> dict:
     """
     Garante estrutura para catálogo de compostos e vínculo no monitor.
@@ -334,20 +376,22 @@ def ensure_batch_id_schema() -> dict:
 
 
 def ensure_batch_sequence(start_with: int = 1) -> dict:
-    result = {"batch_sequence_created": False}
+    result = {"batch_sequence_created": False, "batch_sequence_start_with": None}
     with get_conn() as conn:
         with conn.cursor() as cur:
             if not _sequence_exists(cur, MONITOR_OWNER, BATCH_ID_SEQUENCE):
+                computed_start = max(1, int(start_with), _max_known_batch_id(cur) + 1)
                 cur.execute(
                     f"""
                     CREATE SEQUENCE {BATCH_ID_SEQUENCE_FQN}
-                    START WITH {int(start_with)}
+                    START WITH {computed_start}
                     INCREMENT BY 1
                     NOCACHE
                     NOCYCLE
                     """
                 )
                 result["batch_sequence_created"] = True
+                result["batch_sequence_start_with"] = computed_start
         conn.commit()
     return result
 
@@ -853,11 +897,23 @@ def set_state(conn, key: str, dict_value: dict) -> None:
 
 def next_batch_id_from_sequence(conn) -> int:
     with conn.cursor() as cur:
-        cur.execute(f"SELECT {BATCH_ID_SEQUENCE}.NEXTVAL FROM dual")
+        next_from_tables = _max_known_batch_id(cur) + 1
+        cur.execute(f"SELECT {BATCH_ID_SEQUENCE_FQN}.NEXTVAL FROM dual")
         row = cur.fetchone()
     if not row or row[0] is None:
-        raise RuntimeError(f"Falha ao obter NEXTVAL da sequence {BATCH_ID_SEQUENCE}.")
-    return int(row[0])
+        raise RuntimeError(f"Falha ao obter NEXTVAL da sequence {BATCH_ID_SEQUENCE_FQN}.")
+
+    seq_next = int(row[0])
+    if seq_next < next_from_tables:
+        logger.bind(component="db", event="batch_id_sequence_behind").warning(
+            "Sequence {} atras do maior batch registrado (nextval={} / proximo={}): usando {}.",
+            BATCH_ID_SEQUENCE_FQN,
+            seq_next,
+            next_from_tables,
+            next_from_tables,
+        )
+        return int(next_from_tables)
+    return seq_next
 
 
 def create_batch(

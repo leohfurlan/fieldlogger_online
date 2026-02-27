@@ -125,3 +125,34 @@ def test_compute_batch_metrics_energy_estimation_changes_with_power_factor(monke
         metrics_pf_100["energy_est_kwh"] * 0.5,
         rel=1e-8,
     )
+
+
+def test_derive_batch_events_prefers_reading_end_over_meta_end():
+    readings = _sample_readings()
+    batch_meta = {"end_ts": readings[-1]["ts"] + timedelta(hours=3)}
+
+    events = derive_batch_events(readings, batch_meta=batch_meta)
+    end_events = [evt for evt in events if evt.get("type") == "END"]
+
+    assert len(end_events) == 1
+    assert end_events[0]["ts"] == readings[-1]["ts"]
+    assert end_events[0]["reason"] == "lid_falling_edge"
+
+
+def test_compute_batch_metrics_reconciles_duration_with_batch_meta():
+    readings = _sample_readings()
+    start_ts = readings[0]["ts"]
+    mismatched_events = [
+        {"type": "START", "ts": start_ts},
+        {"type": "END", "ts": start_ts + timedelta(hours=3, seconds=100)},
+    ]
+
+    metrics = compute_batch_metrics(
+        readings,
+        events=mismatched_events,
+        batch_meta={"duration_s": 100.0},
+    )
+
+    assert metrics["duration_s"] == pytest.approx(100.0, rel=1e-9)
+    assert metrics["start_ts"] == readings[0]["ts"]
+    assert metrics["end_ts"] == readings[-1]["ts"]

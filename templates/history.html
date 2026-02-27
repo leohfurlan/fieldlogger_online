@@ -281,6 +281,12 @@
       cursor:not-allowed;
     }
 
+    select option,
+    select optgroup{
+      color:#0b1220;
+      background:#ffffff;
+    }
+
     textarea{
       resize:vertical;
       min-height:84px;
@@ -380,14 +386,29 @@
       margin:0;
     }
 
-    .hidden-action{ display:none; }
-    .hidden-action.show{ display:inline-flex; }
-
     .analysis-grid{
       display:grid;
       grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
       gap:12px;
       align-items:stretch;
+    }
+
+    .batch-details-grid{
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap:10px;
+    }
+
+    .batch-detail-card{
+      min-height:86px;
+    }
+
+    .batch-detail-value{
+      font-size:14px;
+      font-weight:700;
+      line-height:1.35;
+      white-space:pre-wrap;
+      word-break:break-word;
     }
 
     .batch-focus-panel .batch-meta{
@@ -500,6 +521,7 @@
       border-radius:10px;
       padding:10px;
     }
+
     .compare-metrics{
       display:grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -708,6 +730,7 @@
       .filters-grid{ grid-template-columns: repeat(2, minmax(150px, 1fr)); }
       .compare-grid{ grid-template-columns: 1fr; min-height:0; }
       .compare-metrics{ grid-template-columns: 1fr 1fr; }
+      .batch-details-grid{ grid-template-columns: 1fr 1fr; }
       .summary-panel #summaryTable{
         height:280px;
         min-height:280px;
@@ -735,6 +758,7 @@
         max-height:300px;
       }
       .batch-metrics-grid{ grid-template-columns: 1fr; }
+      .batch-details-grid{ grid-template-columns: 1fr; }
       .compare-chart-wrap{ min-height:260px; }
       .compare-metrics{ grid-template-columns: 1fr; }
     }
@@ -806,7 +830,8 @@
     <div class="content-header">
       <h2>Analise de batches</h2>
       <div class="content-actions">
-        <button id="btnAssignComposto" class="hidden-action" type="button">Vincular composto</button>
+        <button id="btnAssignComposto" class="btn-primary" type="button">Vincular composto ao batch</button>
+        <button id="btnRefreshCompostos" type="button">Atualizar lista de compostos</button>
         <div class="column-manager-wrap">
           <button id="btnManageCols" type="button">Colunas</button>
           <div id="columnManager" class="column-manager" hidden aria-hidden="true">
@@ -904,6 +929,26 @@
       </article>
     </div>
 
+    <article class="panel batch-details-panel">
+      <div class="panel-title">
+        <h3>Analise do batch selecionado</h3>
+      </div>
+      <div class="batch-details-grid">
+        <div class="metric-card batch-detail-card">
+          <span class="metric-label">Descricao do composto</span>
+          <span id="selectedBatchComposto" class="batch-detail-value">--</span>
+        </div>
+        <div class="metric-card batch-detail-card">
+          <span class="metric-label">Lote</span>
+          <span id="selectedBatchLote" class="batch-detail-value">--</span>
+        </div>
+        <div class="metric-card batch-detail-card">
+          <span class="metric-label">Observacoes</span>
+          <span id="selectedBatchObservacoes" class="batch-detail-value">--</span>
+        </div>
+      </div>
+    </article>
+
     <article class="panel energy-panel">
       <div class="panel-title">
         <h3>Energia acumulada por batch</h3>
@@ -926,17 +971,17 @@
       <div class="panel-title">
         <h3>Comparar ciclos</h3>
         <div class="panel-tools">
-          <select id="cmpBaselineBatch" title="Batch padrao">
-            <option value="">Batch padrao</option>
+          <select id="cmpBaselineBatch" title="Batch padrão">
+            <option value="">Batch padrão</option>
           </select>
-          <select id="cmpTargetBatch" title="Batch alvo">
-            <option value="">Batch alvo</option>
+          <select id="cmpTargetBatch" title="Batch em análise">
+            <option value="">Batch em análise</option>
           </select>
           <button id="btnCompareBatches" class="btn-primary" type="button">Comparar</button>
           <span class="info-icon" title="Compara assinatura, perfil e metricas entre dois batches." aria-label="Informacao">ℹ</span>
         </div>
       </div>
-      <div id="compareStatus" class="inline-status">Selecione dois batches para comparar.</div>
+      <div id="compareStatus" class="inline-status">Selecione Batch padrão e Batch em análise para comparar.</div>
       <div class="compare-grid">
         <div class="compare-chart-wrap">
           <canvas id="compareTempChart"></canvas>
@@ -963,11 +1008,11 @@
           <span id="metricDeltaAuc" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Energia proxy baseline (A*s)</span>
+          <span class="metric-label">Energia proxy Batch padrão (A*s)</span>
           <span id="metricEnergyBaseline" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Energia proxy target (A*s)</span>
+          <span class="metric-label">Energia proxy Batch em análise (A*s)</span>
           <span id="metricEnergyTarget" class="metric-value">--</span>
         </div>
         <div class="metric-card">
@@ -975,11 +1020,11 @@
           <span id="metricEnergyDelta" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Energia estimada baseline (kWh)</span>
+          <span class="metric-label">Energia estimada Batch padrão (kWh)</span>
           <span id="metricEnergyEstBaseline" class="metric-value">--</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Energia estimada target (kWh)</span>
+          <span class="metric-label">Energia estimada Batch em análise (kWh)</span>
           <span id="metricEnergyEstTarget" class="metric-value">--</span>
         </div>
         <div class="metric-card">
@@ -1034,6 +1079,7 @@
     <div class="modal-actions">
       <span id="assignModalStatus" class="modal-status"></span>
       <div class="tools">
+        <button id="btnAssignRefreshCompostos" type="button">Atualizar compostos</button>
         <button id="btnAssignCancel" type="button">Cancelar</button>
         <button id="btnAssignSave" type="button">Salvar vinculo</button>
       </div>
@@ -1104,6 +1150,15 @@
     return new Date(year, month - 1, day, hours, minutes);
   }
 
+  function formatInputDateTime(value){
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
+    return [
+      value.getFullYear(),
+      pad2(value.getMonth() + 1),
+      pad2(value.getDate()),
+    ].join("-") + `T${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
+  }
+
   function formatDateShort(value){
     if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "--";
     return `${pad2(value.getDate())}/${pad2(value.getMonth() + 1)}/${value.getFullYear()}`;
@@ -1154,6 +1209,7 @@
   const rangeStart = document.getElementById("rangeStart");
   const rangeEnd = document.getElementById("rangeEnd");
   const btnAssignComposto = document.getElementById("btnAssignComposto");
+  const btnRefreshCompostos = document.getElementById("btnRefreshCompostos");
 
   const assignModal = document.getElementById("assignModal");
   const assignBatch = document.getElementById("assignBatch");
@@ -1162,6 +1218,7 @@
   const assignObservacoes = document.getElementById("assignObservacoes");
   const assignModalStatus = document.getElementById("assignModalStatus");
   const btnAssignSave = document.getElementById("btnAssignSave");
+  const btnAssignRefreshCompostos = document.getElementById("btnAssignRefreshCompostos");
 
   const cmpBaselineBatch = document.getElementById("cmpBaselineBatch");
   const cmpTargetBatch = document.getElementById("cmpTargetBatch");
@@ -1182,6 +1239,9 @@
 
   const selectedBatchStatus = document.getElementById("selectedBatchStatus");
   const selectedBatchMeta = document.getElementById("selectedBatchMeta");
+  const selectedBatchComposto = document.getElementById("selectedBatchComposto");
+  const selectedBatchLote = document.getElementById("selectedBatchLote");
+  const selectedBatchObservacoes = document.getElementById("selectedBatchObservacoes");
   const batchMetricId = document.getElementById("batchMetricId");
   const batchMetricDuration = document.getElementById("batchMetricDuration");
   const batchMetricCurrentAuc = document.getElementById("batchMetricCurrentAuc");
@@ -1222,6 +1282,17 @@
   let columnManagerOpen = false;
   const HISTORY_CHART_MAX_POINTS = 1600;
   const BATCH_ENERGY_CHART_MAX_POINTS = 1800;
+  const DEFAULT_HISTORY_WINDOW_HOURS = 24;
+
+  function applyDefaultHistoryRange(force = false){
+    if (!force && rangeStart.value && rangeEnd.value) return;
+
+    const end = new Date();
+    const start = new Date(end.getTime() - (DEFAULT_HISTORY_WINDOW_HOURS * 60 * 60 * 1000));
+
+    rangeStart.value = formatInputDateTime(start);
+    rangeEnd.value = formatInputDateTime(end);
+  }
 
   function updatePeriodSummary(){
     const startText = formatDateShort(parseInputDateTime(rangeStart.value));
@@ -1230,9 +1301,50 @@
   }
 
   function updateAssignActionVisibility(){
-    const hasSelectedBatch = !selBatch.disabled && normalizeBatchId(selBatch.value) !== "";
-    btnAssignComposto.classList.toggle("show", hasSelectedBatch);
-    btnAssignComposto.disabled = !hasSelectedBatch;
+    const selectedBatch = normalizeBatchId(selBatch.value);
+    btnAssignComposto.disabled = false;
+    btnAssignComposto.textContent = selectedBatch
+      ? `Vincular composto (batch ${selectedBatch})`
+      : "Vincular composto ao batch";
+    btnAssignComposto.title = selectedBatch
+      ? `Abrir vinculacao para o batch ${selectedBatch}`
+      : "Abrir modal para escolher batch e composto";
+  }
+
+  async function refreshCompostosCatalog(){
+    loadStatus.textContent = "Atualizando lista de compostos...";
+    loadDot.classList.remove("ok");
+
+    btnRefreshCompostos.disabled = true;
+    btnAssignRefreshCompostos.disabled = true;
+    const modalWasOpen = assignModal.classList.contains("open");
+    const preferredBatchId = normalizeBatchId(assignBatch.value) || normalizeBatchId(selBatch.value);
+
+    try {
+      const res = await fetch("/api/compostos/import", { method: "POST" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.detail || `HTTP ${res.status}`);
+      }
+
+      const imported = Number(payload?.importados || 0);
+      loadStatus.textContent = `Lista de compostos atualizada (${imported} registros processados).`;
+      loadDot.classList.add("ok");
+
+      if (modalWasOpen) {
+        await loadAssignModalOptions(preferredBatchId);
+        assignModalStatus.textContent = `Lista de compostos atualizada (${imported} registros).`;
+      }
+    } catch (err) {
+      loadStatus.textContent = `Erro ao atualizar compostos: ${err.message}`;
+      loadDot.classList.remove("ok");
+      if (modalWasOpen) {
+        assignModalStatus.textContent = `Erro ao atualizar compostos: ${err.message}`;
+      }
+    } finally {
+      btnRefreshCompostos.disabled = false;
+      btnAssignRefreshCompostos.disabled = false;
+    }
   }
 
   function getPeriodSignature(){
@@ -1449,52 +1561,14 @@
     },
   });
 
-  const stageMarkerPlugin = {
-    id: "stageMarkerPlugin",
-    afterDatasetsDraw(chart, args, pluginOptions){
-      const markers = Array.isArray(pluginOptions?.markers) ? pluginOptions.markers : [];
-      if (!markers.length) return;
-
-      const xScale = chart.scales.x;
-      const yScale = chart.scales.y;
-      if (!xScale || !yScale) return;
-
-      const ctx = chart.ctx;
-      for (const marker of markers){
-        const value = Number(marker.x);
-        if (!Number.isFinite(value)) continue;
-        const xPixel = xScale.getPixelForValue(String(Math.round(value)));
-        if (!Number.isFinite(xPixel)) continue;
-
-        ctx.save();
-        ctx.strokeStyle = marker.color || "rgba(148,163,184,0.9)";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 4]);
-        ctx.beginPath();
-        ctx.moveTo(xPixel, yScale.top);
-        ctx.lineTo(xPixel, yScale.bottom);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        if (marker.label){
-          ctx.fillStyle = marker.color || "#e2e8f0";
-          ctx.font = "11px Arial";
-          ctx.fillText(String(marker.label), xPixel + 3, yScale.top + 12);
-        }
-        ctx.restore();
-      }
-    }
-  };
-  Chart.register(stageMarkerPlugin);
-
   const compareAxisLabels = Array.from({ length: 101 }, (_, idx) => String(idx));
   const compareTempChart = new Chart(document.getElementById("compareTempChart"), {
     type: "line",
     data: {
       labels: compareAxisLabels.slice(),
       datasets: [
-        { label: "Temp baseline (C)", data: [], borderColor: "#22c55e", tension: 0.2, pointRadius: 0, borderWidth: 2 },
-        { label: "Temp target (C)", data: [], borderColor: "#f97316", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Temp Batch padrão (C)", data: [], borderColor: "#22c55e", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Temp Batch em análise (C)", data: [], borderColor: "#f97316", tension: 0.2, pointRadius: 0, borderWidth: 2 },
       ],
     },
     options: {
@@ -1505,7 +1579,6 @@
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: "#e6edf3" } },
-        stageMarkerPlugin: { markers: [] },
       },
       scales: {
         x: {
@@ -1527,8 +1600,8 @@
     data: {
       labels: compareAxisLabels.slice(),
       datasets: [
-        { label: "Corrente baseline (A)", data: [], borderColor: "#38bdf8", tension: 0.2, pointRadius: 0, borderWidth: 2 },
-        { label: "Corrente target (A)", data: [], borderColor: "#f43f5e", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Corrente Batch padrão (A)", data: [], borderColor: "#38bdf8", tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Corrente Batch em análise (A)", data: [], borderColor: "#f43f5e", tension: 0.2, pointRadius: 0, borderWidth: 2 },
       ],
     },
     options: {
@@ -1539,7 +1612,6 @@
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: "#e6edf3" } },
-        stageMarkerPlugin: { markers: [] },
       },
       scales: {
         x: {
@@ -1557,6 +1629,17 @@
   });
 
   const tableBaseColumns = [
+    { title: "ID", field: "id", sorter: "number", width: 90 },
+    { title: "Data/Hora", field: "ts", sorter: "string", width: 170 },
+    { title: "Batch ID", field: "batch_id", sorter: "number", hozAlign: "right", width: 110 },
+    { title: "Temperatura (°C)", field: "temperatura", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
+    { title: "Corrente (A)", field: "corrente", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
+    { title: "Tampa (0/1)", field: "tampa", sorter: "number", hozAlign: "center", width: 120 },
+    { title: "Start (0/1)", field: "start", sorter: "number", hozAlign: "center", width: 120 },
+    { title: "Composto", field: "composto", sorter: "string", width: 240 },
+    { title: "Lote", field: "lote", sorter: "string", width: 180 },
+    { title: "Temp RAW", field: "temp_raw", sorter: "number", hozAlign: "right" },
+    { title: "Corr RAW", field: "corr_raw", sorter: "number", hozAlign: "right" },
     {
       title: "",
       field: "__row_actions",
@@ -1570,18 +1653,6 @@
         showRowActionMenu(event, cell.getRow().getData());
       },
     },
-    { title: "ID", field: "id", sorter: "number", width: 90 },
-    { title: "Data/Hora", field: "ts", sorter: "string", width: 170 },
-    { title: "Batch ID", field: "batch_id", sorter: "number", hozAlign: "right", width: 110 },
-    { title: "Composto", field: "composto", sorter: "string", width: 240 },
-    { title: "Lote", field: "lote", sorter: "string", width: 180 },
-    { title: "Observacoes", field: "observacoes", sorter: "string", widthGrow: 2, minWidth: 220 },
-    { title: "Temperatura (°C)", field: "temperatura", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
-    { title: "Corrente (A)", field: "corrente", sorter: "number", hozAlign: "right", formatter: (cell) => fmt2(cell.getValue()) },
-    { title: "Tampa (0/1)", field: "tampa", sorter: "number", hozAlign: "center", width: 120 },
-    { title: "Start (0/1)", field: "start", sorter: "number", hozAlign: "center", width: 120 },
-    { title: "Temp RAW", field: "temp_raw", sorter: "number", hozAlign: "right" },
-    { title: "Corr RAW", field: "corr_raw", sorter: "number", hozAlign: "right" },
   ];
 
   const baseColumnFields = new Set(tableBaseColumns.map((column) => String(column.field || "")));
@@ -1601,7 +1672,9 @@
   });
 
   const summaryColumns = [
-    { title: "Batch", field: "batch_id", sorter: "number", hozAlign: "right", width: 100 },
+    { title: "Batch ID", field: "batch_id", sorter: "number", hozAlign: "right", width: 100 },
+    { title: "Composto", field: "composto", sorter: "string", width: 260 },
+    { title: "Lote", field: "lote", sorter: "string", width: 160 },
     { title: "Inicio", field: "start_ts", sorter: "string", width: 170 },
     { title: "Fim", field: "end_ts", sorter: "string", width: 170 },
     { title: "Duracao (s)", field: "duration_s", sorter: "number", hozAlign: "right", formatter: (cell) => fmtNum(cell.getValue(), 1), width: 120 },
@@ -1626,8 +1699,6 @@
       },
       width: 130,
     },
-    { title: "Composto", field: "composto", sorter: "string", width: 260 },
-    { title: "Lote", field: "lote", sorter: "string", width: 160 },
     { title: "OP", field: "op", sorter: "string", width: 120 },
     { title: "Operador", field: "operador", sorter: "string", width: 150 },
   ];
@@ -1730,7 +1801,7 @@
       if (!row || typeof row !== "object") continue;
       for (const key of Object.keys(row)){
         const field = String(key || "").trim();
-        if (!field || field === "__row_actions") continue;
+        if (!field || field === "__row_actions" || field.toLowerCase() === "observacoes") continue;
         discoveredFields.add(field);
       }
     }
@@ -1770,6 +1841,9 @@
   function clearSelectedBatchCards(statusText){
     selectedBatchStatus.textContent = statusText || "Selecione um batch para carregar metricas e energia acumulada.";
     selectedBatchMeta.textContent = "OP -- | Operador --";
+    selectedBatchComposto.textContent = "--";
+    selectedBatchLote.textContent = "--";
+    selectedBatchObservacoes.textContent = "--";
     batchMetricId.textContent = "--";
     batchMetricDuration.textContent = "--";
     batchMetricCurrentAuc.textContent = "--";
@@ -1870,14 +1944,54 @@
     return decimatePoints(points, BATCH_ENERGY_CHART_MAX_POINTS);
   }
 
-  function updateSelectedBatchCards(batchId, payload){
+  function normalizeText(value){
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
+  }
+
+  function firstNonEmptyText(...values){
+    for (const value of values){
+      const text = normalizeText(value);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function pickFirstRowText(rows, field){
+    if (!Array.isArray(rows)) return "";
+    for (const row of rows){
+      if (!row || typeof row !== "object") continue;
+      const text = normalizeText(row[field]);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function updateSelectedBatchCards(batchId, payload, rows = []){
     const metrics = payload?.metrics || {};
     const meta = payload?.meta || {};
     const energyEstKwh = metrics?.energy_est_kwh ?? metrics?.energy_estimated_kwh;
     const hasEstimatedEnergy = energyEstKwh !== null && energyEstKwh !== undefined;
+    const compostoText = firstNonEmptyText(
+      pickFirstRowText(rows, "composto"),
+      meta?.composto_desc,
+      meta?.composto,
+      meta?.descricao_composto
+    );
+    const loteText = firstNonEmptyText(
+      pickFirstRowText(rows, "lote"),
+      meta?.lote
+    );
+    const observacoesText = firstNonEmptyText(
+      pickFirstRowText(rows, "observacoes"),
+      meta?.observacoes
+    );
 
     selectedBatchStatus.textContent = `Batch ${batchId} carregado.`;
     selectedBatchMeta.textContent = `OP ${meta?.op || "--"} | Operador ${meta?.operador || "--"}`;
+    selectedBatchComposto.textContent = compostoText || "--";
+    selectedBatchLote.textContent = loteText || "--";
+    selectedBatchObservacoes.textContent = observacoesText || "--";
     batchMetricId.textContent = String(batchId || "--");
     batchMetricDuration.textContent = formatDurationSeconds(metrics?.duration_s);
     batchMetricCurrentAuc.textContent = fmtNum(metrics?.current_auc, 3);
@@ -2083,8 +2197,8 @@
       ]);
       if (requestSeq !== batchDetailsLoadSeq) return;
 
-      updateSelectedBatchCards(normalizedBatchId, metricsPayload);
       const rows = Array.isArray(historyPayload?.rows) ? historyPayload.rows : [];
+      updateSelectedBatchCards(normalizedBatchId, metricsPayload, rows);
       const curve = buildEnergyCurves(rows, metricsPayload?.metrics || {});
       setBatchEnergySeries(curve);
       energyChartStatus.textContent = curve.length
@@ -2148,8 +2262,8 @@
       setSelectOptions(selLote, Array.isArray(options.lote) ? options.lote : [], "Todos os lotes", columns.lote);
       setSelectOptions(selComposto, Array.isArray(options.composto) ? options.composto : [], "Todos os compostos", columns.composto);
       setSelectOptions(selBatch, batchValues, "Todos os batches", columns.batch_id);
-      setCompareSelectOptions(cmpBaselineBatch, batchValues, "Batch padrao");
-      setCompareSelectOptions(cmpTargetBatch, batchValues, "Batch alvo");
+      setCompareSelectOptions(cmpBaselineBatch, batchValues, "Batch padrão");
+      setCompareSelectOptions(cmpTargetBatch, batchValues, "Batch em análise");
       optionsPeriodSignature = getPeriodSignature();
       updateAssignActionVisibility();
     } catch (err) {
@@ -2280,6 +2394,9 @@
     assignModal.setAttribute("aria-hidden", "false");
     try {
       await loadAssignModalOptions(preferredBatchId);
+      if (!normalizeBatchId(assignBatch.value)) {
+        assignModalStatus.textContent = "Selecione batch e composto para salvar o vinculo.";
+      }
     } catch (err) {
       assignModalStatus.textContent = `Erro ao carregar opcoes: ${err.message}`;
       btnAssignSave.disabled = true;
@@ -2477,21 +2594,6 @@
     metricDeltaPeakCorr.textContent = fmtSigned(metrics?.peak_corrente_diff, 2);
   }
 
-  function markersToLines(markers, prefix, color){
-    const markerMap = [
-      ["ramp_end_pct", "Ramp"],
-      ["plateau_start_pct", "Plato"],
-      ["discharge_pct", "Descarga"],
-    ];
-    const lines = [];
-    for (const [key, label] of markerMap){
-      const value = Number(markers?.[key]);
-      if (!Number.isFinite(value)) continue;
-      lines.push({ x: value, label: `${prefix}-${label}`, color });
-    }
-    return lines;
-  }
-
   function updateCompareCharts(payload){
     const baselineProfile = payload?.baseline?.profile || {};
     const targetProfile = payload?.target?.profile || {};
@@ -2509,13 +2611,6 @@
     compareCorrChart.data.datasets[0].data = Array.isArray(baselineProfile.corrente) ? baselineProfile.corrente : [];
     compareCorrChart.data.datasets[1].data = Array.isArray(targetProfile.corrente) ? targetProfile.corrente : [];
 
-    const markerLines = [
-      ...markersToLines(baselineProfile.markers, "B", "#22c55e"),
-      ...markersToLines(targetProfile.markers, "T", "#f59e0b"),
-    ];
-    compareTempChart.options.plugins.stageMarkerPlugin.markers = markerLines;
-    compareCorrChart.options.plugins.stageMarkerPlugin.markers = markerLines;
-
     compareTempChart.update("none");
     compareCorrChart.update("none");
   }
@@ -2525,7 +2620,7 @@
     const targetBatch = String(cmpTargetBatch.value || "").trim();
 
     if (!baselineBatch || !targetBatch){
-      compareStatus.textContent = "Selecione batch padrao e batch alvo.";
+      compareStatus.textContent = "Selecione Batch padrão e Batch em análise.";
       return;
     }
 
@@ -2551,7 +2646,7 @@
 
       const baselineSignature = payload?.baseline?.signature || "--";
       const targetSignature = payload?.target?.signature || "--";
-      compareStatus.textContent = `Comparacao pronta. Assinaturas: baseline ${baselineSignature.slice(0, 10)}..., target ${targetSignature.slice(0, 10)}...`;
+      compareStatus.textContent = `Comparacao pronta. Assinaturas: Batch padrão ${baselineSignature.slice(0, 10)}..., Batch em análise ${targetSignature.slice(0, 10)}...`;
     } catch (err) {
       compareStatus.textContent = `Erro na comparacao: ${err.message}`;
     }
@@ -2566,8 +2661,13 @@
 
   btnAssignComposto.onclick = async () => {
     const selectedBatch = normalizeBatchId(selBatch.value);
-    if (!selectedBatch) return;
     await openAssignModal({ batchId: selectedBatch });
+  };
+  btnRefreshCompostos.onclick = async () => {
+    await refreshCompostosCatalog();
+  };
+  btnAssignRefreshCompostos.onclick = async () => {
+    await refreshCompostosCatalog();
   };
 
   btnRowAssignComposto.onclick = async () => {
@@ -2701,8 +2801,7 @@
     selLote.value = "";
     selComposto.value = "";
     selBatch.value = "";
-    rangeStart.value = "";
-    rangeEnd.value = "";
+    applyDefaultHistoryRange(true);
 
     updatePeriodSummary();
     updateAssignActionVisibility();
@@ -2731,6 +2830,7 @@
   rangeStart.addEventListener("input", updatePeriodSummary);
   rangeEnd.addEventListener("input", updatePeriodSummary);
 
+  applyDefaultHistoryRange(true);
   updatePeriodSummary();
   updateAssignActionVisibility();
   rebuildColumnManager();

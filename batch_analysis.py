@@ -12,6 +12,7 @@ DEFAULT_ENERGY_EST_ENABLED = True
 DEFAULT_ENERGY_VLL_VOLTS = 380.0
 DEFAULT_ENERGY_POWER_FACTOR = 0.90
 DEFAULT_ENERGY_LABEL = "Energia estimada (kWh) — PF assumido"
+DEFAULT_DURATION_RECONCILE_TOLERANCE_S = 60.0
 
 
 def _to_float(value: Any) -> float | None:
@@ -234,18 +235,19 @@ def derive_batch_events(readings: list[dict], batch_meta: dict | None = None) ->
 
     end_ts: datetime | None = None
     end_reason = ""
-    meta_end = batch_meta.get("end_ts") if isinstance(batch_meta, dict) else None
-    if isinstance(meta_end, datetime):
-        end_ts = meta_end
-        end_reason = "batch_meta_end_ts"
+    # Prioriza fim por leitura (timeline do monitor). batch_meta.end_ts fica como fallback.
+    lid_open_events = [evt for evt in events if evt["type"] == "LID_OPEN"]
+    if lid_open_events:
+        end_ts = lid_open_events[-1]["ts"]
+        end_reason = lid_open_events[-1].get("reason") or "lid_open_event"
+    elif ordered:
+        end_ts = ordered[-1]["ts"]
+        end_reason = "last_sample_ts"
     else:
-        lid_open_events = [evt for evt in events if evt["type"] == "LID_OPEN"]
-        if lid_open_events:
-            end_ts = lid_open_events[-1]["ts"]
-            end_reason = lid_open_events[-1].get("reason") or "lid_open_event"
-        elif ordered:
-            end_ts = ordered[-1]["ts"]
-            end_reason = "last_sample_ts"
+        meta_end = batch_meta.get("end_ts") if isinstance(batch_meta, dict) else None
+        if isinstance(meta_end, datetime):
+            end_ts = meta_end
+            end_reason = "batch_meta_end_ts"
 
     if end_ts is not None:
         add_event(end_ts, "END", None, end_reason)
@@ -321,8 +323,35 @@ def compute_batch_metrics(
         if raw_duration >= 0:
             duration_s = raw_duration
 
-    if duration_s is None and isinstance(batch_meta, dict):
-        duration_s = _to_float(batch_meta.get("duration_s"))
+    meta_duration_s = None
+    if isinstance(batch_meta, dict):
+        meta_duration_s = _to_float(batch_meta.get("duration_s"))
+
+    # Se o duration vindo de eventos divergir muito do duration persistido do batch,
+    # usa o persistido para evitar distorcoes de clock (ex.: UTC vs horario local).
+    if meta_duration_s is not None and meta_duration_s >= 0:
+        if duration_s is None:
+            duration_s = meta_duration_s
+        elif abs(duration_s - meta_duration_s) > DEFAULT_DURATION_RECONCILE_TOLERANCE_S:
+            duration_s = meta_duration_s
+            if ordered:
+                reading_start_ts = ordered[0]["ts"]
+                reading_end_ts = ordered[-1]["ts"]
+                reading_duration_s = (reading_end_ts - reading_start_ts).total_seconds()
+                if (
+                    reading_duration_s >= 0
+                    and abs(reading_duration_s - meta_duration_s)
+                    <= DEFAULT_DURATION_RECONCILE_TOLERANCE_S
+                ):
+                    start_ts = reading_start_ts
+                    end_ts = reading_end_ts
+                elif isinstance(batch_meta, dict):
+                    meta_start_ts = batch_meta.get("start_ts")
+                    meta_end_ts = batch_meta.get("end_ts")
+                    if isinstance(meta_start_ts, datetime):
+                        start_ts = meta_start_ts
+                    if isinstance(meta_end_ts, datetime):
+                        end_ts = meta_end_ts
 
     current_auc = _compute_auc(ordered, "corrente")
     temp_auc = _compute_auc(ordered, "temp")
